@@ -293,5 +293,15 @@ int shield_install(void) {
    nobody calls shield_install explicitly in that scenario). */
 __attribute__((constructor))
 static void jbshield_ctor(void) {
-  shield_install();
+  int r = shield_install();
+
+  /* debug log proving injection happened */
+  char buf[256] = {0};
+  int fd = open("/var/mobile/jbshield_pid.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd >= 0) {
+    int n = snprintf(buf, sizeof(buf), "pid=%d engine=%s active=%d ret=%d\n",
+                     (int)getpid(), shield_engine_name(), shield_is_active(), r);
+    if (n > 0) write(fd, buf, (size_t)n);
+    close(fd);
+  }
 }
