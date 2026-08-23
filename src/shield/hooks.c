@@ -6,6 +6,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <spawn.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <sys/sysctl.h>
@@ -146,9 +148,13 @@ static int str_is_sensitive(const char *s) {
 
 static const char *(*orig_dyld_get_image_name)(uint32_t);
 static void *(*orig_dlopen)(const char *, int);
+static void *(*orig_dlsym)(void *, const char *);
 static char *(*orig_getenv)(const char *);
 static char *(*orig_realpath)(const char *restrict, char *restrict);
 static pid_t (*orig_fork)(void);
+static int (*orig_posix_spawn)(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *, char *const [], char *const []);
+static int (*orig_posix_spawnp)(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *, char *const [], char *const []);
+static ssize_t (*orig_readlink)(const char *, char *, size_t);
 
 /* dyld view: hide sensitive dylib paths from the loaded-images scan */
 static const char *my_dyld_get_image_name(uint32_t index) {
@@ -177,10 +183,35 @@ static pid_t my_fork(void) {
   return -1;
 }
 
-/* dlopen view: RTLD_NOLOAD probes for CydiaSubstrate/libsubstrate/etc must fail */
+/* dlopen view: block ALL dlopen of sensitive paths (RTLD_NOLOAD probes AND actual loads) */
 static void *my_dlopen(const char *path, int mode) {
-  if (path && (mode & RTLD_NOLOAD) && str_is_sensitive(path)) return NULL;
+  if (path && str_is_sensitive(path)) return NULL;
   return orig_dlopen ? orig_dlopen(path, mode) : NULL;
+}
+
+/* dlsym: never reveal jailbreak symbols */
+static void *my_dlsym(void *handle, const char *symbol) {
+  if (symbol && str_is_sensitive(symbol)) return NULL;
+  return orig_dlsym ? orig_dlsym(handle, symbol) : NULL;
+}
+
+/* posix_spawn / posix_spawnp: prevent process creation (bypasses fork) */
+static int my_posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *fa, const posix_spawnattr_t *attr, char *const argv[], char *const envp[]) {
+  errno = EPERM;
+  return -1;
+}
+static int my_posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *fa, const posix_spawnattr_t *attr, char *const argv[], char *const envp[]) {
+  errno = EPERM;
+  return -1;
+}
+
+/* readlink: hide symlinks to jailbreak paths */
+static ssize_t my_readlink(const char *path, char *buf, size_t bufsize) {
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
+    errno = ENOENT;
+    return -1;
+  }
+  return orig_readlink ? orig_readlink(path, buf, bufsize) : -1;
 }
 
 /* environment view: never let DYLD_* leak */
@@ -268,6 +299,10 @@ int shield_install(void) {
     const char *dyname_n[] = {"_dyld_get_image_name", NULL};
     const char *realpath_n[] = {"realpath", NULL};
     const char *fork_n[] = {"fork", NULL};
+    const char *dlsym_n[] = {"dlsym", NULL};
+    const char *posix_spawn_n[] = {"posix_spawn", NULL};
+    const char *posix_spawnp_n[] = {"posix_spawnp", NULL};
+    const char *readlink_n[] = {"readlink", NULL};
 
     hook_one(stat_n,  (void *)my_stat,           (void **)&orig_stat);
     hook_one(lstat_n, (void *)my_lstat,          (void **)&orig_lstat);
@@ -284,6 +319,10 @@ int shield_install(void) {
     hook_one(dyname_n,(void *)my_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
     hook_one(realpath_n,(void *)my_realpath,     (void **)&orig_realpath);
     hook_one(fork_n,(void *)my_fork,             (void **)&orig_fork);
+    hook_one(posix_spawn_n,(void *)my_posix_spawn, (void **)&orig_posix_spawn);
+    hook_one(posix_spawnp_n,(void *)my_posix_spawnp,(void **)&orig_posix_spawnp);
+    hook_one(readlink_n,(void *)my_readlink,     (void **)&orig_readlink);
+    hook_one(dlsym_n,(void *)my_dlsym,         (void **)&orig_dlsym);
 
     g_shield_ready = 1;
     return 0;
