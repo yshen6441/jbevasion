@@ -126,6 +126,19 @@ int shield_policy_load_default(void) {
   shield_policy_add_rule(NULL, NULL, "/Applications/Zebra.app", SHIELD_ACTION_HIDE);
   shield_policy_add_rule(NULL, NULL, "/private/var/lib/cydia", SHIELD_ACTION_HIDE);
   shield_policy_add_rule(NULL, NULL, "/private/var/tmp/cydia.log", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/lib/apt", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/stash", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/db/stash", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/mobile/Library/Preferences/com.ellekit", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/mobile/Library/Preferences/com.substrate", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/run/jailbreak", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/bin/bash", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/usr/sbin/sshd", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/Library/MobileSubstrate", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/Library/Substrate", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/log/syslog", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/log/apt", SHIELD_ACTION_HIDE);
+  shield_policy_add_rule(NULL, NULL, "/private/var/log/dpkg", SHIELD_ACTION_HIDE);
 
   g_loaded = 1;
   return 0;
