@@ -2,7 +2,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <libjailbreak/libjailbreak.h>
+
+/*
+ * We intentionally include the specific upstream headers, NOT the umbrella
+ * libjailbreak.h. The umbrella pulls jbclient_xpc.h / util.h which require
+ * Xcode private Theos SDK headers (xpc_private.h). The API we use lives in
+ * primitives.h + kernel.h (which transitively pulls info.h + pvh.h); the few
+ * util.h helpers we need are declared manually below (symbols match the real
+ * dylib at runtime).
+ */
+#include <libjailbreak/primitives.h>
+#include <libjailbreak/kernel.h>
+
+/* util.h – declared here to avoid including jbclient_xpc.h */
+uint64_t proc_self(void);
+uint64_t proc_get_vnode_for_fd(uint64_t proc, int fd);
 
 static bool g_krw_ready = false;
 
