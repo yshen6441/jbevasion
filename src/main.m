@@ -51,13 +51,13 @@ static int cmd_probe(void) {
 	uid_t uid = getuid();
 	printf("[i] running as uid=%d\n", uid);
 	if (uid != 0) {
-		printf("[-] must run as root\n");
+		printf("[-] krw requires root – try 'sudo jbevasion probe' or SSH as root\n");
 		return 1;
 	}
 
 	int ret = krw_init();
 	if (ret != 0) {
-		printf("[-] krw_init failed (%d). Is this a jbroot / Dopamine environment?\n", ret);
+		printf("[-] krw_init failed (%d). Is this a Dopamine /var/jb environment?\n", ret);
 		return 1;
 	}
 	printf("[+] primitives initialized\n");
