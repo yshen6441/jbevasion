@@ -9,6 +9,7 @@
 #include "krw.h"
 
 extern int cmd_detect(void);
+extern int cmd_shield_test(void);
 
 #define MACH_HEADER_MAGIC_64 0xfeedfacf
 
@@ -18,6 +19,7 @@ static void print_usage(void) {
 	printf("  probe         Verify the Dopamine KRW primitives end to end\n");
 	printf("  vnode <path>  Resolve a path to its vnode and print flags\n");
 	printf("  detect        Run jailbreak detection probes (Phase 1)\n");
+	printf("  shield test   Load JailbreakShield.dylib and run detection\n");
 	printf("  clearjail     (unimplemented placeholder)\n");
 	printf("  help          Show this message\n");
 }
@@ -156,6 +158,8 @@ int main(int argc, char *argv[]) {
 		return cmd_vnode(argc >= 3 ? argv[2] : NULL);
 	} else if (strcmp(cmd, "detect") == 0) {
 		return cmd_detect();
+	} else if (strcmp(cmd, "shield") == 0 && argc >= 3 && strcmp(argv[2], "test") == 0) {
+		return cmd_shield_test();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {
 		print_usage();
 		return 0;

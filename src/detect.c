@@ -72,8 +72,8 @@ static void probe_filesystem(void) {
 	PROBE_FILE("/Applications/Cydia.app", "/Applications/Cydia.app");
 	PROBE_FILE("/Applications/Sileo.app", "/Applications/Sileo.app");
 
-	PROBE_BOOL("Check /var/jb is a symlink", false);
 	struct stat st;
+	PROBE_BOOL("Check /var/jb is a symlink", false);
 	if (lstat("/var/jb", &st) == 0) {
 		PROBE_BOOL("Check /var/jb is a symlink", S_ISLNK(st.st_mode));
 	}
@@ -92,7 +92,7 @@ static void probe_dyld(void) {
 		if (strstr(name, "Substrate") || strstr(name, "substrate") ||
 			strstr(name, "TweakInject") || strstr(name, "jailbreak") ||
 			strstr(name, "CydiaSubstrate") || strstr(name, "MobileSubstrate") ||
-			strstr(name, "libhooker")) {
+			strstr(name, "libhooker") || strstr(name, "JailbreakShield")) {
 			printf("  [!] Suspicious dylib: %s\n", name);
 			found++;
 		}
@@ -140,7 +140,7 @@ static void probe_process(void) {
 		waitpid(child, &status, 0);
 		PROBE_BOOL("fork() works", true);
 	} else {
-		PROBE_INT("fork() failed", "errno=%d", errno);
+		PROBE_BOOL("fork() works", false);
 	}
 
 	posix_spawnattr_t attr;
@@ -175,12 +175,6 @@ static void probe_sysctl(void) {
 	len = sizeof(boottime);
 	if (sysctlbyname("kern.boottime", &boottime, &len, NULL, 0) == 0) {
 		PROBE_INT("kern.boottime.tv_sec", "%lld", (long long)boottime.tv_sec);
-	}
-
-	int hw_memsize = 0;
-	len = sizeof(hw_memsize);
-	if (sysctlbyname("hw.memsize", &hw_memsize, &len, NULL, 0) == 0) {
-		PROBE_INT("hw.memsize", "%d MB", hw_memsize / 1024 / 1024);
 	}
 
 	len = sizeof(buf);
@@ -293,4 +287,36 @@ int cmd_detect(void) {
 	printf("  Detection probe complete\n");
 	printf("========================================\n");
 	return 0;
+}
+
+int cmd_shield_test(void) {
+	printf("========================================\n");
+	printf("  JailbreakShield Test\n");
+	printf("========================================\n");
+
+	const char *dylib_paths[] = {
+		"/var/jb/usr/lib/TweakInject/JailbreakShield.dylib",
+		"/usr/lib/TweakInject/JailbreakShield.dylib",
+		"JailbreakShield.dylib",
+	};
+	void *handle = NULL;
+	for (size_t i = 0; i < sizeof(dylib_paths) / sizeof(dylib_paths[0]); i++) {
+		handle = dlopen(dylib_paths[i], RTLD_LAZY | RTLD_LOCAL);
+		if (handle) {
+			printf("[+] dlopen'd: %s\n", dylib_paths[i]);
+			break;
+		}
+	}
+
+	if (!handle) {
+		printf("[-] Failed to load JailbreakShield.dylib: %s\n", dlerror());
+		printf("[-] Check that the dylib is installed at /var/jb/usr/lib/TweakInject/\n");
+		return 1;
+	}
+
+	printf("[+] Shield loaded, running detection probe...\n");
+	printf("    If hooks work, /var/jb/ paths will show as 'not found'\n");
+	printf("    (since the process name '%s' matches the default policy)\n", "jbevasion");
+
+	return cmd_detect();
 }
