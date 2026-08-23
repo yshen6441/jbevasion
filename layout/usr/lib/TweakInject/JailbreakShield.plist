@@ -6,7 +6,9 @@
 	<dict>
 		<key>Bundles</key>
 		<array>
-			<string>com.apple.UIKit</string>
+			<string>com.cmbchina.MPBBank</string>
+			<string>com.bybit.app</string>
+			<string>com.bytecrossing.Egern</string>
 		</array>
 	</dict>
 </dict>
