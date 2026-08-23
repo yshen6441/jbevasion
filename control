@@ -1,0 +1,10 @@
+Package: com.xsf1re.jbevasion
+Name: jbevasion
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Jailbreak environment hiding controller (Dopamine)
+Author: jbevasion
+Maintainer: jbevasion
+Section: Tweaks
+Depends: mobilesubstrate
+Tag: purpose::extension

@@ -1,0 +1,42 @@
+name: Build
+
+on:
+  push:
+    branches: ["master"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: brew install make xz ldid
+
+      - name: Setup Theos
+        run: |
+          export THEOS="$HOME/theos"
+          git clone --depth 1 --recursive https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/xybp888/iOS-SDKs.git "$HOME/ios-sdks"
+          git -C "$HOME/ios-sdks" sparse-checkout set iPhoneOS17.0.2.sdk
+          cp -R "$HOME/ios-sdks/iPhoneOS17.0.2.sdk" "$THEOS/sdks/"
+          ls "$THEOS/sdks"
+
+      - name: Build deb
+        run: |
+          gmake clean
+          gmake package FINALPACKAGE=1
+
+      - name: Show artifacts
+        run: |
+          ls -la packages/ 2>/dev/null || true
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jbevasion-deb
+          path: packages/*.deb
