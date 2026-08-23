@@ -14,6 +14,7 @@
 #include <mach/mach.h>
 #include <signal.h>
 #include <spawn.h>
+#include <sys/wait.h>
 #include "krw.h"
 
 #define PROBE_SECTION(NAME) \
@@ -204,7 +205,6 @@ static void probe_sysctl(void) {
 
 	int32_t sbvals[2];
 	sbvals[0] = CTL_KERN;
-	sbvals[1] = KERN_PROC;
 	sbvals[1] = KERN_PROC_ALL;
 	len = 0;
 	if (sysctl(sbvals, 2, NULL, &len, NULL, 0) == 0) {
