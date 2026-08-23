@@ -65,8 +65,10 @@ static struct {
 } g_saved_vnodes[HIDE_SAVED_MAX];
 static int g_saved_count = 0;
 
-/* v_type offset in vnode struct (iOS 16/17 arm64e) */
+/* vnode offsets (iOS 16/17 arm64e) */
 #define OFF_V_TYPE          0x074
+#define OFF_V_USECOUNT      0x060
+#define OFF_V_IOCOUNT       0x064
 
 /* ---------- placeholder file (unused, kept for reference) ---------- */
 #define PLACEHOLDER_PATH  "/tmp/.jbhide_placeholder"
@@ -144,13 +146,18 @@ static int vnode_mark_bad(uint64_t orig_vnode) {
        before most operations and returns ENOENT for VBAD vnodes. */
     *(uint16_t *)(vbuf + OFF_V_TYPE) = 0;
 
+    /* Inflate usecount/iocount to prevent the kernel from recycling
+       this vnode (which would restore the original file visibility). */
+    *(uint32_t *)(vbuf + OFF_V_USECOUNT) = 0x2000;
+    *(uint32_t *)(vbuf + OFF_V_IOCOUNT)  = 0x2000;
+
     /* Write back */
     if (krw_write_buf(orig_vnode, vbuf, sizeof(vbuf)) != 0) {
         fprintf(stderr, "hide: failed to write vnode\n");
         return -1;
     }
 
-    printf("hide: vnode 0x%llx  v_type 0x%x -> VBAD\n",
+    printf("hide: vnode 0x%llx  v_type 0x%x -> VBAD  usecount:=0x2000\n",
            (unsigned long long)orig_vnode, orig_type);
 
     return 0;
