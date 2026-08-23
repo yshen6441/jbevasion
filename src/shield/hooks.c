@@ -65,7 +65,7 @@ static int my_access(const char *path, int mode) {
 /* open/openat/fopen paths must also be hidden */
 static int (*orig_open)(const char *, int, ...);
 static int (*orig_openat)(int, const char *, int, ...);
-static int (*orig_fopen)(const char *restrict, const char *restrict);
+static FILE *(*orig_fopen)(const char *restrict, const char *restrict);
 static int (*orig_fstatat)(int, const char *restrict, struct stat *restrict, int);
 static int (*orig_faccessat)(int, const char *, int, int);
 
@@ -144,16 +144,8 @@ static int str_is_sensitive(const char *s) {
   return 0;
 }
 
-static const char *(*orig_dyld_get_image_name)(uint32_t);
 static void *(*orig_dlopen)(const char *, int);
 static char *(*orig_getenv)(const char *);
-
-/* dyld view: hide sensitive dylib paths from the loaded-images scan */
-static const char *my_dyld_get_image_name(uint32_t index) {
-  const char *name = orig_dyld_get_image_name ? orig_dyld_get_image_name(index) : NULL;
-  if (name && str_is_sensitive(name)) return "";
-  return name;
-}
 
 /* dlopen view: RTLD_NOLOAD probes for CydiaSubstrate/libsubstrate/etc must fail */
 static void *my_dlopen(const char *path, int mode) {
@@ -241,7 +233,6 @@ int shield_install(void) {
     const char *fopen_n[] = {"fopen", NULL};
     const char *fstatat_n[] = {"fstatat$INODE64", "fstatat", NULL};
     const char *faccessat_n[] = {"faccessat", NULL};
-    const char *dyname_n[] = {"_dyld_get_image_name", NULL};
     const char *dlopen_n[] = {"dlopen", NULL};
     const char *getenv_n[] = {"getenv", NULL};
 
@@ -255,7 +246,6 @@ int shield_install(void) {
     hook_one(fopen_n, (void *)my_fopen,          (void **)&orig_fopen);
     hook_one(fstatat_n,(void *)my_fstatat,       (void **)&orig_fstatat);
     hook_one(faccessat_n,(void *)my_faccessat,   (void **)&orig_faccessat);
-    hook_one(dyname_n,(void *)my_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
     hook_one(dlopen_n,(void *)my_dlopen,         (void **)&orig_dlopen);
     hook_one(getenv_n,(void *)my_getenv,         (void **)&orig_getenv);
 
