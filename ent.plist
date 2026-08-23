@@ -12,5 +12,7 @@
 	<array>
 		<string>IOSurfaceRootUserClient</string>
 	</array>
+	<key>com.apple.private.boot-snapshot</key>
+	<true/>
 </dict>
 </plist>

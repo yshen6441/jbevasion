@@ -8,26 +8,25 @@
 #include <sys/sysctl.h>
 #include "krw.h"
 #include "hide.h"
+#include "fd_rdir.h"
 
-extern int cmd_detect(void);
-extern int cmd_shield_test(void);
+
 
 #define MACH_HEADER_MAGIC_64 0xfeedfacf
 
 static void print_usage(void) {
 	printf("Usage: jbevasion <command>\n");
 	printf("Commands:\n");
-	printf("  probe         Verify the Dopamine KRW primitives end to end\n");
-	printf("  vnode <path>  Resolve a path to its vnode and print flags\n");
-	printf("  detect        Run jailbreak detection probes (Phase 1)\n");
-	printf("  shield test   (deprecated - use 'hide' instead)\n");
-	printf("  hide          Hide all jailbreak paths at the vnode level (kernel)\n");
-	printf("  hide <path>   Hide a specific path at the vnode level\n");
-	printf("  hide <pid>    Hide all jailbreak paths + platformize target PID\n");
-	printf("  restore       Restore all hidden vnodes (reboot also works)\n");
-	printf("  app <pid>     Platformize + clean csflags for a specific PID\n");
-	printf("  platformize   Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
-	printf("  help          Show this message\n");
+	printf("  probe <pid>        Print filedesc offsets + live field values\n");
+	printf("  vnode <path>       Resolve a path to its vnode and print flags\n");
+	printf("  chroot-prep        Mount orig-fs snapshot and prepare clean root\n");
+	printf("  chroot <pid>       Apply fd_rdir chroot + platformize to target PID\n");
+	printf("  chroot-cleanup     Unmount the clean root snapshot\n");
+	printf("  app <pid>          Platformize + clean csflags for a specific PID\n");
+	printf("  platformize        Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
+	printf("  hide               (deprecated) Per-process cleanup only\n");
+	printf("  restore            (deprecated) No-op\n");
+	printf("  help               Show this message\n");
 }
 
 static void print_mach_header(uint64_t base) {
@@ -54,7 +53,7 @@ static void print_mach_header(uint64_t base) {
 	printf("    flags      = 0x%x\n", mh.flags);
 }
 
-static int cmd_probe(void) {
+static int cmd_probe_kernel(void) {
 	printf("====================================\n");
 	printf(" jbevasion probe (Dopamine KRW)\n");
 	printf("====================================\n");
@@ -165,39 +164,20 @@ static int cmd_hide(int argc, char *argv[]) {
 		return 1;
 	}
 
-	if (argc >= 3) {
-		if (is_numeric(argv[2])) {
-			/* Hide all paths + platformize target PID */
-			pid_t target = (pid_t)atoi(argv[2]);
-			printf("========================================\n");
-			printf("  Hiding all jailbreak paths + app pid %d\n", target);
-			printf("========================================\n");
-			ret = vnode_hide_all();
-			printf("========================================\n");
-			printf("  Platformizing pid %d\n", target);
-			printf("========================================\n");
-			proc_hide_pid(target);
-		} else {
-			/* Hide a specific path */
-			ret = vnode_hide_path(argv[2]);
-		}
+	printf("========================================\n");
+	printf("  hide is deprecated – use 'chroot' instead\n");
+	printf("  Running per-process cleanup only\n");
+	printf("========================================\n");
+
+	if (argc >= 3 && is_numeric(argv[2])) {
+		pid_t target = (pid_t)atoi(argv[2]);
+		proc_hide_pid(target);
+		printf("[+] per-process cleanup done for pid %d\n", target);
 	} else {
-		/* Hide all known paths + self */
-		printf("========================================\n");
-		printf("  Hiding all jailbreak paths at vnode level\n");
-		printf("========================================\n");
-		ret = vnode_hide_all();
-		printf("========================================\n");
-		printf("  Platformizing current process\n");
-		printf("========================================\n");
 		proc_hide_self();
+		printf("[+] per-process cleanup done for self\n");
 	}
 
-	if (ret != 0) {
-		printf("[-] some paths failed\n");
-		return 1;
-	}
-	printf("[+] vnode hiding complete\n");
 	return 0;
 }
 
@@ -229,20 +209,91 @@ static int cmd_app(int argc, char *argv[]) {
 }
 
 static int cmd_restore(void) {
+    printf("========================================\n");
+    printf("  restore is deprecated – no-op (fd_rdir chroot is reversible by restarting the process)\n");
+    printf("========================================\n");
+    vnode_restore_all();
+    return 0;
+}
+
+static int cmd_chroot_prep(void) {
     int ret = krw_init();
     if (ret != 0) {
         printf("[-] krw_init failed (%d)\n", ret);
         return 1;
     }
     printf("========================================\n");
-    printf("  Restoring all hidden vnodes\n");
+    printf("  Preparing clean root for fd_rdir chroot\n");
     printf("========================================\n");
-    ret = vnode_restore_all();
+    ret = fd_rdir_prepare();
     if (ret != 0) {
-        printf("[-] nothing to restore or restore failed\n");
+        printf("[-] fd_rdir_prepare failed\n");
         return 1;
     }
-    printf("[+] restore complete\n");
+    printf("[+] clean root ready at %s\n", JBEVASION_ROOT);
+    return 0;
+}
+
+static int cmd_chroot(int argc, char *argv[]) {
+    if (argc < 3) {
+        printf("[-] usage: jbevasion chroot <pid>\n");
+        return 1;
+    }
+    pid_t target = (pid_t)atoi(argv[2]);
+    if (target <= 0) {
+        printf("[-] invalid pid: %s\n", argv[2]);
+        return 1;
+    }
+    int ret = krw_init();
+    if (ret != 0) {
+        printf("[-] krw_init failed (%d)\n", ret);
+        return 1;
+    }
+    printf("========================================\n");
+    printf("  Applying fd_rdir chroot to pid %d\n", target);
+    printf("========================================\n");
+    ret = fd_rdir_apply(target);
+    if (ret != 0) {
+        printf("[-] fd_rdir_apply failed\n");
+        return 1;
+    }
+    printf("[+] fd_rdir chroot applied to pid %d\n", target);
+    return 0;
+}
+
+static int cmd_chroot_cleanup(void) {
+    printf("========================================\n");
+    printf("  Cleaning up fd_rdir chroot\n");
+    printf("========================================\n");
+    fd_rdir_cleanup();
+    printf("[+] chroot cleanup done\n");
+    return 0;
+}
+
+static int cmd_probe_filedesc(int argc, char *argv[]) {
+    if (argc < 3) {
+        printf("[-] usage: jbevasion probe <pid>\n");
+        return 1;
+    }
+    pid_t target = (pid_t)atoi(argv[2]);
+    if (target <= 0) {
+        printf("[-] invalid pid: %s\n", argv[2]);
+        return 1;
+    }
+    int ret = krw_init();
+    if (ret != 0) {
+        printf("[-] krw_init failed (%d)\n", ret);
+        return 1;
+    }
+    printf("========================================\n");
+    printf("  Probing filedesc offsets for pid %d\n", target);
+    printf("========================================\n");
+    ret = fd_rdir_probe(target);
+    if (ret != 0) {
+        printf("[-] probe failed\n");
+        return 1;
+    }
+    printf("[+] probe done\n");
     return 0;
 }
 
@@ -262,13 +313,18 @@ int main(int argc, char *argv[]) {
 	}
 	const char *cmd = argv[1];
 	if (strcmp(cmd, "probe") == 0) {
-		return cmd_probe();
+		if (argc >= 3 && is_numeric(argv[2])) {
+			return cmd_probe_filedesc(argc, argv);
+		}
+		return cmd_probe_kernel();
 	} else if (strcmp(cmd, "vnode") == 0) {
 		return cmd_vnode(argc >= 3 ? argv[2] : NULL);
-	} else if (strcmp(cmd, "detect") == 0) {
-		return cmd_detect();
-	} else if (strcmp(cmd, "shield") == 0 && argc >= 3 && strcmp(argv[2], "test") == 0) {
-		return cmd_shield_test();
+	} else if (strcmp(cmd, "chroot-prep") == 0) {
+		return cmd_chroot_prep();
+	} else if (strcmp(cmd, "chroot") == 0) {
+		return cmd_chroot(argc, argv);
+	} else if (strcmp(cmd, "chroot-cleanup") == 0) {
+		return cmd_chroot_cleanup();
 	} else if (strcmp(cmd, "hide") == 0) {
 		return cmd_hide(argc, argv);
 	} else if (strcmp(cmd, "restore") == 0) {
