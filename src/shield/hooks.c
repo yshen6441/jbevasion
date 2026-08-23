@@ -148,6 +148,7 @@ static const char *(*orig_dyld_get_image_name)(uint32_t);
 static void *(*orig_dlopen)(const char *, int);
 static char *(*orig_getenv)(const char *);
 static char *(*orig_realpath)(const char *restrict, char *restrict);
+static pid_t (*orig_fork)(void);
 
 /* dyld view: hide sensitive dylib paths from the loaded-images scan */
 static const char *my_dyld_get_image_name(uint32_t index) {
@@ -168,6 +169,12 @@ static char *my_realpath(const char *restrict path, char *restrict resolved) {
     return NULL;
   }
   return ret;
+}
+
+/* fork: sandboxed apps cannot fork; return -1 to hide jailbreak fork capability */
+static pid_t my_fork(void) {
+  errno = EPERM;
+  return -1;
 }
 
 /* dlopen view: RTLD_NOLOAD probes for CydiaSubstrate/libsubstrate/etc must fail */
@@ -260,6 +267,7 @@ int shield_install(void) {
     const char *getenv_n[] = {"getenv", NULL};
     const char *dyname_n[] = {"_dyld_get_image_name", NULL};
     const char *realpath_n[] = {"realpath", NULL};
+    const char *fork_n[] = {"fork", NULL};
 
     hook_one(stat_n,  (void *)my_stat,           (void **)&orig_stat);
     hook_one(lstat_n, (void *)my_lstat,          (void **)&orig_lstat);
@@ -275,6 +283,7 @@ int shield_install(void) {
     hook_one(getenv_n,(void *)my_getenv,         (void **)&orig_getenv);
     hook_one(dyname_n,(void *)my_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
     hook_one(realpath_n,(void *)my_realpath,     (void **)&orig_realpath);
+    hook_one(fork_n,(void *)my_fork,             (void **)&orig_fork);
 
     g_shield_ready = 1;
     return 0;
