@@ -8,6 +8,8 @@
 #include <sys/sysctl.h>
 #include "krw.h"
 
+extern int cmd_detect(void);
+
 #define MACH_HEADER_MAGIC_64 0xfeedfacf
 
 static void print_usage(void) {
@@ -15,6 +17,7 @@ static void print_usage(void) {
 	printf("Commands:\n");
 	printf("  probe         Verify the Dopamine KRW primitives end to end\n");
 	printf("  vnode <path>  Resolve a path to its vnode and print flags\n");
+	printf("  detect        Run jailbreak detection probes (Phase 1)\n");
 	printf("  clearjail     (unimplemented placeholder)\n");
 	printf("  help          Show this message\n");
 }
@@ -151,6 +154,8 @@ int main(int argc, char *argv[]) {
 		return cmd_probe();
 	} else if (strcmp(cmd, "vnode") == 0) {
 		return cmd_vnode(argc >= 3 ? argv[2] : NULL);
+	} else if (strcmp(cmd, "detect") == 0) {
+		return cmd_detect();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {
 		print_usage();
 		return 0;
