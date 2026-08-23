@@ -18,6 +18,9 @@
 uint64_t proc_self(void);
 uint64_t proc_get_vnode_for_fd(uint64_t proc, int fd);
 
+/* libjailbreak.h – DWIM wrapper over jbclient_initialize_primitives_internal */
+extern int jbclient_initialize_primitives(void);
+
 static bool g_krw_ready = false;
 
 int krw_init(void) {
