@@ -25,3 +25,13 @@ internal-tool-all::
 	$(MAKE) -C stub SYSROOT="$(SYSROOT)"
 
 include $(THEOS_MAKE_PATH)/tool.mk
+
+# --- Library: JailbreakShield.dylib ---
+LIBRARY_NAME = JailbreakShield
+JailbreakShield_FILES = src/shield/hooks.c src/shield/policy.c src/shield/fishhook.c
+JailbreakShield_CFLAGS = -Iinclude -I.
+JailbreakShield_LDFLAGS = -flat_namespace -undefined suppress
+JailbreakShield_CODESIGN_FLAGS = -Sent.plist
+JailbreakShield_INSTALL_PATH = /usr/lib/TweakInject
+
+include $(THEOS_MAKE_PATH)/library.mk
