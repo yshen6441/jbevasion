@@ -317,22 +317,6 @@ static char *my_getenv(const char *name) {
   return orig_getenv ? orig_getenv(name) : NULL;
 }
 
-/* ---------- manual dyld struct declarations (private header dyld_images.h not in SDK) ---------- */
-
-struct jb_dyld_image_info {
-  const struct mach_header *imageLoadAddress;
-  const char *imageFilePath;
-  uintptr_t imageFileModDate;
-};
-
-struct jb_dyld_all_image_infos {
-  uint32_t version;
-  uint32_t infoArrayCount;
-  const struct jb_dyld_image_info *infoArray;
-};
-
-extern const struct jb_dyld_all_image_infos *_dyld_get_all_image_infos(void);
-
 /* ---------- sandbox write test blocking ---------- */
 
 static int is_sandbox_write_path(const char *path) {
@@ -345,35 +329,6 @@ static int is_sandbox_write_path(const char *path) {
   if (strncmp(path, "/etc/", 5) == 0) return 1;
   if (strcmp(path, "/etc") == 0) return 1;
   return 0;
-}
-
-/* ---------- scrub dyld_all_image_infos: zero out sensitive imageFilePath pointers ---------- */
-
-static void scrub_dyld_images(void) {
-  const struct jb_dyld_all_image_infos *infos = _dyld_get_all_image_infos();
-  if (!infos) return;
-
-  uint32_t count = infos->infoArrayCount;
-  const struct jb_dyld_image_info *array = infos->infoArray;
-  if (!array || count == 0) return;
-
-  for (uint32_t i = 0; i < count; i++) {
-    const char *path = array[i].imageFilePath;
-    if (!path) continue;
-
-    int is_sensitive = 0;
-    for (int k = 0; g_sensitive_kw[k]; k++) {
-      if (strstr(path, g_sensitive_kw[k])) {
-        is_sensitive = 1;
-        break;
-      }
-    }
-    if (is_sensitive) {
-      /* The infoArray is in dyld's heap (writable); zero out the path pointer */
-      struct jb_dyld_image_info *mut = (struct jb_dyld_image_info *)&array[i];
-      mut->imageFilePath = NULL;
-    }
-  }
 }
 
 /* ---------- hook engine: MSHookFunction (ElleKit/Substrate) first, fishhook fallback ---------- */
@@ -531,9 +486,6 @@ static void jbshield_ctor(void) {
       *env[0] = '\0';
     }
   }
-
-  /* Phase 5: scrub dyld_all_image_infos to hide our dylib path */
-  scrub_dyld_images();
 
   int r = shield_install();
 
