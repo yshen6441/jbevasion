@@ -10,6 +10,8 @@
 #include "fishhook.h"
 #include "policy.h"
 
+static int g_shield_ready = 0;
+
 static int (*orig_stat)(const char *restrict, struct stat *restrict);
 static int (*orig_lstat)(const char *restrict, struct stat *restrict);
 static int (*orig_stat64)(const char *restrict, struct stat *restrict);
@@ -21,7 +23,7 @@ static int (*orig_openat)(int, const char *, int, ...);
 
 static int hook_stat_common(const char *restrict path, struct stat *restrict buf,
                             int (*fallback)(const char *restrict, struct stat *restrict)) {
-  if (path && shield_policy_should_hide(path)) {
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
     errno = ENOENT;
     return -1;
   }
@@ -45,7 +47,7 @@ static int my_lstat64(const char *restrict path, struct stat *restrict buf) {
 }
 
 static int my_fstatat(int fd, const char *restrict path, struct stat *restrict buf, int flag) {
-  if (path && shield_policy_should_hide(path)) {
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
     errno = ENOENT;
     return -1;
   }
@@ -53,7 +55,7 @@ static int my_fstatat(int fd, const char *restrict path, struct stat *restrict b
 }
 
 static int my_access(const char *path, int mode) {
-  if (path && shield_policy_should_hide(path)) {
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
     errno = ENOENT;
     return -1;
   }
@@ -61,7 +63,8 @@ static int my_access(const char *path, int mode) {
 }
 
 static int my_open(const char *path, int flags, ...) {
-  if (path && shield_policy_should_hide(path)) {
+  (void)flags;
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
     errno = ENOENT;
     return -1;
   }
@@ -69,15 +72,18 @@ static int my_open(const char *path, int flags, ...) {
 }
 
 static int my_openat(int fd, const char *path, int flags, ...) {
-  if (path && shield_policy_should_hide(path)) {
+  (void)fd;
+  (void)flags;
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
     errno = ENOENT;
     return -1;
   }
   return orig_openat(fd, path, flags);
 }
 
-__attribute__((constructor)) static void shield_init(void) {
-  if (getenv("SHIELD_DISABLE")) return;
+int shield_install(void) {
+  if (g_shield_ready) return 0;
+  if (getenv("SHIELD_DISABLE")) return -1;
 
   shield_policy_load_default();
 
@@ -93,9 +99,10 @@ __attribute__((constructor)) static void shield_init(void) {
   };
 
   int ret = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
-  if (ret == 0) {
-    fprintf(stderr, "JailbreakShield: loaded (%s)\n", shield_get_current_proc_name());
-  } else {
-    fprintf(stderr, "JailbreakShield: rebind_symbols failed (%d)\n", ret);
-  }
+  g_shield_ready = (ret == 0);
+  return ret;
+}
+
+int shield_is_active(void) {
+  return g_shield_ready;
 }

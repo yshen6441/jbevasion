@@ -314,9 +314,19 @@ int cmd_shield_test(void) {
 		return 1;
 	}
 
-	printf("[+] Shield loaded, running detection probe...\n");
-	printf("    If hooks work, /var/jb/ paths will show as 'not found'\n");
-	printf("    (since the process name '%s' matches the default policy)\n", "jbevasion");
+	int (*shield_install)(void) = dlsym(handle, "shield_install");
+	if (!shield_install) {
+		printf("[-] dlsym(shield_install) failed: %s\n", dlerror());
+		return 1;
+	}
 
+	int ret = shield_install();
+	if (ret != 0) {
+		printf("[-] shield_install failed (%d)\n", ret);
+		return 1;
+	}
+
+	printf("[+] Shield installed, running detection probe...\n");
+	printf("    If hooks work, /var/jb/ paths will show as 'not found'\n");
 	return cmd_detect();
 }
