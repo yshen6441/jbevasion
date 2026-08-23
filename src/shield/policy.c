@@ -82,12 +82,21 @@ int shield_policy_add_rule(const char *proc_name, const char *bundle_id, const c
   if (g_config.policy_count >= SHIELD_MAX_POLICIES) return -1;
 
   shield_policy_t *policy = NULL;
-  for (int i = 0; i < g_config.policy_count; i++) {
-    shield_policy_t *p = &g_config.policies[i];
-    if ((proc_name && p->proc_name[0] && strcmp(p->proc_name, proc_name) == 0) ||
-        (bundle_id && p->bundle_id[0] && strcmp(p->bundle_id, bundle_id) == 0)) {
-      policy = p;
-      break;
+
+  if (proc_name == NULL && bundle_id == NULL) {
+    /* default policy: group all default rules into the first empty-identity policy */
+    for (int i = 0; i < g_config.policy_count; i++) {
+      shield_policy_t *p = &g_config.policies[i];
+      if (p->proc_name[0] == 0 && p->bundle_id[0] == 0) { policy = p; break; }
+    }
+  } else {
+    for (int i = 0; i < g_config.policy_count; i++) {
+      shield_policy_t *p = &g_config.policies[i];
+      if ((proc_name && p->proc_name[0] && strcmp(p->proc_name, proc_name) == 0) ||
+          (bundle_id && p->bundle_id[0] && strcmp(p->bundle_id, bundle_id) == 0)) {
+        policy = p;
+        break;
+      }
     }
   }
 
