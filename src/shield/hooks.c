@@ -14,10 +14,6 @@
 #include <mach-o/dyld.h>
 #include <mach-o/ldsyms.h>
 #include "fishhook.h"
-/* libjailbreak functions declared manually (avoid pulling in <xpc/xpc.h> via kernel.h) */
-extern uint64_t proc_self(void);
-extern int proc_vreadbuf(uint64_t proc, const void *addr, void *outdata, size_t datalen);
-extern int proc_vwritebuf(uint64_t proc, const void *addr, const void *indata, size_t datalen);
 #include "policy.h"
 
 extern char **environ;
@@ -351,71 +347,33 @@ static int is_sandbox_write_path(const char *path) {
   return 0;
 }
 
-/* ---------- KRW: clean dyld_all_image_infos in the kernel-(observable) userspace struct ---------- */
+/* ---------- scrub dyld_all_image_infos: zero out sensitive imageFilePath pointers ---------- */
 
-static void krw_clean_dyld_images(void) {
-  uint64_t myproc = proc_self();
-  if (!myproc) return;
-
+static void scrub_dyld_images(void) {
   const struct jb_dyld_all_image_infos *infos = _dyld_get_all_image_infos();
   if (!infos) return;
 
-  /* Read the first 3 fields: version(4) + infoArrayCount(4) + infoArray(8) */
-  uint32_t count = 0;
-  uint64_t array_addr = 0;
-  if (proc_vreadbuf(myproc, (uint8_t *)infos + 4, &count, 4) != 0) return;
-  if (proc_vreadbuf(myproc, (uint8_t *)infos + 8, &array_addr, 8) != 0) return;
+  uint32_t count = infos->infoArrayCount;
+  const struct jb_dyld_image_info *array = infos->infoArray;
+  if (!array || count == 0) return;
 
-  if (!array_addr || count == 0) return;
-
-  /* Read the full infoArray entries */
-  size_t entry_size = 24;
-  size_t buf_size = count * entry_size;
-  uint8_t *array_buf = malloc(buf_size);
-  if (!array_buf) return;
-  if (proc_vreadbuf(myproc, (void *)array_addr, array_buf, buf_size) != 0) {
-    free(array_buf);
-    return;
-  }
-
-  /* Filter: shift non-sensitive entries forward */
-  uint32_t write_idx = 0;
-  for (uint32_t read_idx = 0; read_idx < count; read_idx++) {
-    uint64_t *entry = (uint64_t *)(array_buf + read_idx * entry_size);
-    uint64_t path_addr = entry[1]; /* imageFilePath at offset 8 */
+  for (uint32_t i = 0; i < count; i++) {
+    const char *path = array[i].imageFilePath;
+    if (!path) continue;
 
     int is_sensitive = 0;
-    if (path_addr) {
-      char path[256];
-      if (proc_vreadbuf(myproc, (void *)path_addr, path, 255) == 0) {
-        path[255] = '\0';
-        for (int i = 0; g_sensitive_kw[i]; i++) {
-          if (strstr(path, g_sensitive_kw[i])) {
-            is_sensitive = 1;
-            break;
-          }
-        }
+    for (int k = 0; g_sensitive_kw[k]; k++) {
+      if (strstr(path, g_sensitive_kw[k])) {
+        is_sensitive = 1;
+        break;
       }
     }
-
-    if (!is_sensitive) {
-      if (write_idx != read_idx) {
-        memcpy(array_buf + write_idx * entry_size,
-               array_buf + read_idx * entry_size, entry_size);
-      }
-      write_idx++;
+    if (is_sensitive) {
+      /* The infoArray is in dyld's heap (writable); zero out the path pointer */
+      struct jb_dyld_image_info *mut = (struct jb_dyld_image_info *)&array[i];
+      mut->imageFilePath = NULL;
     }
   }
-
-  /* Write back the compacted array */
-  if (write_idx < count) {
-    proc_vwritebuf(myproc, (void *)array_addr, array_buf,
-                   write_idx * entry_size);
-    /* Update the count via KRW */
-    proc_vwritebuf(myproc, (uint8_t *)infos + 4, &write_idx, 4);
-  }
-
-  free(array_buf);
 }
 
 /* ---------- hook engine: MSHookFunction (ElleKit/Substrate) first, fishhook fallback ---------- */
@@ -574,8 +532,8 @@ static void jbshield_ctor(void) {
     }
   }
 
-  /* Phase 5: kernel-level dyld image hiding via KRW */
-  krw_clean_dyld_images();
+  /* Phase 5: scrub dyld_all_image_infos to hide our dylib path */
+  scrub_dyld_images();
 
   int r = shield_install();
 
