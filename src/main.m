@@ -24,6 +24,7 @@ static void print_usage(void) {
 	printf("  hide          Hide all jailbreak paths at the vnode level (kernel)\n");
 	printf("  hide <path>   Hide a specific path at the vnode level\n");
 	printf("  hide <pid>    Hide all jailbreak paths + platformize target PID\n");
+	printf("  restore       Restore all hidden vnodes (reboot also works)\n");
 	printf("  app <pid>     Platformize + clean csflags for a specific PID\n");
 	printf("  platformize   Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
 	printf("  help          Show this message\n");
@@ -234,6 +235,24 @@ static int cmd_app(int argc, char *argv[]) {
 	return 0;
 }
 
+static int cmd_restore(void) {
+    int ret = krw_init();
+    if (ret != 0) {
+        printf("[-] krw_init failed (%d)\n", ret);
+        return 1;
+    }
+    printf("========================================\n");
+    printf("  Restoring all hidden vnodes\n");
+    printf("========================================\n");
+    ret = vnode_restore_all();
+    if (ret != 0) {
+        printf("[-] nothing to restore or restore failed\n");
+        return 1;
+    }
+    printf("[+] restore complete\n");
+    return 0;
+}
+
 static int cmd_platformize(void) {
 	int ret = krw_init();
 	if (ret != 0) {
@@ -259,6 +278,8 @@ int main(int argc, char *argv[]) {
 		return cmd_shield_test();
 	} else if (strcmp(cmd, "hide") == 0) {
 		return cmd_hide(argc, argv);
+	} else if (strcmp(cmd, "restore") == 0) {
+		return cmd_restore();
 	} else if (strcmp(cmd, "app") == 0) {
 		return cmd_app(argc, argv);
 	} else if (strcmp(cmd, "platformize") == 0) {

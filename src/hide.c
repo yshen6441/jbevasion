@@ -57,6 +57,13 @@
 
 /* We read/write a generous block to capture the whole vnode */
 #define VNODE_BUF_SIZE 0x200
+#define HIDE_SAVED_MAX 64
+
+static struct {
+    uint64_t vaddr;
+    uint8_t  data[VNODE_BUF_SIZE];
+} g_saved_vnodes[HIDE_SAVED_MAX];
+static int g_saved_count = 0;
 
 /* Offsets of fields we must preserve from the original vnode */
 #define OFF_V_LISTFLAG      0x050
@@ -121,6 +128,22 @@ static int vnode_swap_with_placeholder(uint64_t orig_vnode, uint64_t repl_vnode)
         fprintf(stderr, "hide: invalid vnode (orig=0x%llx repl=0x%llx)\n",
                 (unsigned long long)orig_vnode, (unsigned long long)repl_vnode);
         return -1;
+    }
+
+    /* Save original vnode content for restore */
+    if (g_saved_count < HIDE_SAVED_MAX) {
+        int found = 0;
+        for (int i = 0; i < g_saved_count; i++) {
+            if (g_saved_vnodes[i].vaddr == orig_vnode) { found = 1; break; }
+        }
+        if (!found) {
+            uint8_t save_buf[VNODE_BUF_SIZE];
+            if (krw_read_buf(orig_vnode, save_buf, sizeof(save_buf)) == 0) {
+                g_saved_vnodes[g_saved_count].vaddr = orig_vnode;
+                memcpy(g_saved_vnodes[g_saved_count].data, save_buf, sizeof(save_buf));
+                g_saved_count++;
+            }
+        }
     }
 
     /* Read replacement vnode */
@@ -253,6 +276,26 @@ int vnode_hide_all(void) {
     vnode_hide_path("/var/jb/Library/Frameworks/CydiaSubstrate.framework");
 
     return ret;
+}
+
+/* ---------- restore all hidden vnodes ---------- */
+int vnode_restore_all(void) {
+    int restored = 0;
+    for (int i = 0; i < g_saved_count; i++) {
+        int ret = krw_write_buf(g_saved_vnodes[i].vaddr,
+                                g_saved_vnodes[i].data, VNODE_BUF_SIZE);
+        if (ret == 0) {
+            printf("restore: OK  0x%llx\n",
+                   (unsigned long long)g_saved_vnodes[i].vaddr);
+            restored++;
+        } else {
+            fprintf(stderr, "restore: FAILED  0x%llx\n",
+                    (unsigned long long)g_saved_vnodes[i].vaddr);
+        }
+    }
+    g_saved_count = 0;
+    printf("restore: %d vnodes restored\n", restored);
+    return (restored > 0) ? 0 : -1;
 }
 
 /* ---------- per-process kernel-level cleanup ---------- */
