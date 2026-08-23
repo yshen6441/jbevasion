@@ -92,7 +92,7 @@ static void probe_dyld(void) {
 		if (strstr(name, "Substrate") || strstr(name, "substrate") ||
 			strstr(name, "TweakInject") || strstr(name, "jailbreak") ||
 			strstr(name, "CydiaSubstrate") || strstr(name, "MobileSubstrate") ||
-			strstr(name, "libhooker") || strstr(name, "JailbreakShield")) {
+			strstr(name, "libhooker")) {
 			printf("  [!] Suspicious dylib: %s\n", name);
 			found++;
 		}
@@ -312,44 +312,10 @@ int cmd_detect(void) {
 
 int cmd_shield_test(void) {
 	printf("========================================\n");
-	printf("  JailbreakShield Test\n");
+	printf("  Shield test no longer available\n");
+	printf("  Use 'jbevasion hide' for kernel-level vnode hiding\n");
 	printf("========================================\n");
-
-	const char *dylib_paths[] = {
-		"/var/jb/usr/lib/TweakInject/JailbreakShield.dylib",
-		"/usr/lib/TweakInject/JailbreakShield.dylib",
-		"JailbreakShield.dylib",
-	};
-	void *handle = NULL;
-	for (size_t i = 0; i < sizeof(dylib_paths) / sizeof(dylib_paths[0]); i++) {
-		handle = dlopen(dylib_paths[i], RTLD_LAZY | RTLD_LOCAL);
-		if (handle) {
-			printf("[+] dlopen'd: %s\n", dylib_paths[i]);
-			break;
-		}
-	}
-
-	if (!handle) {
-		printf("[-] Failed to load JailbreakShield.dylib: %s\n", dlerror());
-		printf("[-] Check that the dylib is installed at /var/jb/usr/lib/TweakInject/\n");
-		return 1;
-	}
-
-	int (*shield_install)(void) = dlsym(handle, "shield_install");
-	if (!shield_install) {
-		printf("[-] dlsym(shield_install) failed: %s\n", dlerror());
-		return 1;
-	}
-	const char *(*shield_engine_name)(void) = dlsym(handle, "shield_engine_name");
-
-	int ret = shield_install();
-	if (ret != 0) {
-		printf("[-] shield_install failed (%d)\n", ret);
-		return 1;
-	}
-
-	const char *eng = shield_engine_name ? shield_engine_name() : "unknown";
-	printf("[+] Shield installed (engine=%s), running detection probe...\n", eng);
-	printf("    If hooks work, /var/jb/ paths will show as 'not found'\n");
-	return cmd_detect();
+	printf("[i] The hook-based approach has been replaced by vnode-level hiding.\n");
+	printf("[i] Run: jbevasion hide   (as root, requires krw)\n");
+	return 0;
 }

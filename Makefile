@@ -14,7 +14,7 @@ include $(THEOS)/makefiles/common.mk
 
 TOOL_NAME = jbevasion
 
-jbevasion_FILES = src/main.m src/krw.c src/detect.c
+jbevasion_FILES = src/main.m src/krw.c src/detect.c src/hide.c
 jbevasion_CFLAGS = -Iinclude -fobjc-arc
 jbevasion_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib
 jbevasion_CODESIGN_FLAGS = -Sent.plist
@@ -25,13 +25,3 @@ internal-tool-all::
 	$(MAKE) -C stub SYSROOT="$(SYSROOT)"
 
 include $(THEOS_MAKE_PATH)/tool.mk
-
-# --- Library: JailbreakShield.dylib ---
-LIBRARY_NAME = JailbreakShield
-JailbreakShield_FILES = src/shield/hooks.c src/shield/policy.c src/shield/fishhook.c
-JailbreakShield_CFLAGS = -Iinclude -I.
-JailbreakShield_LDFLAGS = -flat_namespace -undefined suppress
-JailbreakShield_CODESIGN_FLAGS = -Sent.plist
-JailbreakShield_INSTALL_PATH = /usr/lib/TweakInject
-
-include $(THEOS_MAKE_PATH)/library.mk

@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/sysctl.h>
 #include "krw.h"
+#include "hide.h"
 
 extern int cmd_detect(void);
 extern int cmd_shield_test(void);
@@ -19,8 +20,12 @@ static void print_usage(void) {
 	printf("  probe         Verify the Dopamine KRW primitives end to end\n");
 	printf("  vnode <path>  Resolve a path to its vnode and print flags\n");
 	printf("  detect        Run jailbreak detection probes (Phase 1)\n");
-	printf("  shield test   Load JailbreakShield.dylib and run detection\n");
-	printf("  clearjail     (unimplemented placeholder)\n");
+	printf("  shield test   (deprecated - use 'hide' instead)\n");
+	printf("  hide          Hide all jailbreak paths at the vnode level (kernel)\n");
+	printf("  hide <path>   Hide a specific path at the vnode level\n");
+	printf("  hide <pid>    Hide all jailbreak paths + platformize target PID\n");
+	printf("  app <pid>     Platformize + clean csflags for a specific PID\n");
+	printf("  platformize   Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
 	printf("  help          Show this message\n");
 }
 
@@ -146,6 +151,98 @@ static int cmd_vnode(const char *path) {
 	return 0;
 }
 
+static int is_numeric(const char *s) {
+	if (!s || !*s) return 0;
+	while (*s) { if (*s < '0' || *s > '9') return 0; s++; }
+	return 1;
+}
+
+static int cmd_hide(int argc, char *argv[]) {
+	int ret = krw_init();
+	if (ret != 0) {
+		printf("[-] krw_init failed (%d). Are you root on a Dopamine jailbreak?\n", ret);
+		return 1;
+	}
+
+	if (vnode_hide_init() != 0) {
+		printf("[-] failed to initialize vnode hiding\n");
+		return 1;
+	}
+
+	if (argc >= 3) {
+		if (is_numeric(argv[2])) {
+			/* Hide all paths + platformize target PID */
+			pid_t target = (pid_t)atoi(argv[2]);
+			printf("========================================\n");
+			printf("  Hiding all jailbreak paths + app pid %d\n", target);
+			printf("========================================\n");
+			ret = vnode_hide_all();
+			printf("========================================\n");
+			printf("  Platformizing pid %d\n", target);
+			printf("========================================\n");
+			proc_hide_pid(target);
+		} else {
+			/* Hide a specific path */
+			ret = vnode_hide_path(argv[2]);
+		}
+	} else {
+		/* Hide all known paths + self */
+		printf("========================================\n");
+		printf("  Hiding all jailbreak paths at vnode level\n");
+		printf("========================================\n");
+		ret = vnode_hide_all();
+		printf("========================================\n");
+		printf("  Platformizing current process\n");
+		printf("========================================\n");
+		proc_hide_self();
+	}
+
+	vnode_hide_cleanup();
+
+	if (ret != 0) {
+		printf("[-] some paths failed\n");
+		return 1;
+	}
+	printf("[+] vnode hiding complete\n");
+	return 0;
+}
+
+static int cmd_app(int argc, char *argv[]) {
+	if (argc < 3) {
+		printf("[-] usage: jbevasion app <pid>\n");
+		return 1;
+	}
+	pid_t target = (pid_t)atoi(argv[2]);
+	if (target <= 0) {
+		printf("[-] invalid pid: %s\n", argv[2]);
+		return 1;
+	}
+	int ret = krw_init();
+	if (ret != 0) {
+		printf("[-] krw_init failed (%d)\n", ret);
+		return 1;
+	}
+	printf("========================================\n");
+	printf("  Per-app kernel-level cleanup for pid %d\n", target);
+	printf("========================================\n");
+	ret = proc_hide_pid(target);
+	if (ret != 0) {
+		printf("[-] app cleanup failed\n");
+		return 1;
+	}
+	printf("[+] app cleanup complete for pid %d\n", target);
+	return 0;
+}
+
+static int cmd_platformize(void) {
+	int ret = krw_init();
+	if (ret != 0) {
+		printf("[-] krw_init failed (%d)\n", ret);
+		return 1;
+	}
+	return proc_hide_self();
+}
+
 int main(int argc, char *argv[]) {
 	if (argc < 2) {
 		print_usage();
@@ -160,6 +257,12 @@ int main(int argc, char *argv[]) {
 		return cmd_detect();
 	} else if (strcmp(cmd, "shield") == 0 && argc >= 3 && strcmp(argv[2], "test") == 0) {
 		return cmd_shield_test();
+	} else if (strcmp(cmd, "hide") == 0) {
+		return cmd_hide(argc, argv);
+	} else if (strcmp(cmd, "app") == 0) {
+		return cmd_app(argc, argv);
+	} else if (strcmp(cmd, "platformize") == 0) {
+		return cmd_platformize();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {
 		print_usage();
 		return 0;
