@@ -12,7 +12,10 @@
 #include <spawn.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
+#include <mach-o/dyld_images.h>
 #include <mach-o/ldsyms.h>
+#include <libjailbreak/primitives.h>
+#include <libjailbreak/kernel.h>
 #include "fishhook.h"
 #include "policy.h"
 
@@ -87,6 +90,11 @@ static int my_open(const char *path, int flags, ...) {
     errno = ENOENT;
     return -1;
   }
+  /* Block sandbox write tests: apps try to write outside sandbox to detect jailbreak */
+  if (g_shield_ready && path && (flags & (O_CREAT | O_WRONLY | O_RDWR)) && is_sandbox_write_path(path)) {
+    errno = EPERM;
+    return -1;
+  }
   return orig_open ? orig_open(path, flags, mode) : -1;
 }
 
@@ -102,12 +110,21 @@ static int my_openat(int dirfd, const char *path, int flags, ...) {
     errno = ENOENT;
     return -1;
   }
+  if (g_shield_ready && path && (flags & (O_CREAT | O_WRONLY | O_RDWR)) && is_sandbox_write_path(path)) {
+    errno = EPERM;
+    return -1;
+  }
   return orig_openat ? orig_openat(dirfd, path, flags, mode) : -1;
 }
 
 static FILE *my_fopen(const char *restrict path, const char *restrict mode) {
   if (g_shield_ready && path && shield_policy_should_hide(path)) {
     errno = ENOENT;
+    return NULL;
+  }
+  /* Block sandbox write tests */
+  if (g_shield_ready && path && mode && (mode[0] == 'w' || mode[0] == 'a') && is_sandbox_write_path(path)) {
+    errno = EPERM;
     return NULL;
   }
   return orig_fopen ? orig_fopen(path, mode) : NULL;
@@ -162,6 +179,7 @@ static ssize_t (*orig_readlink)(const char *, char *, size_t);
 static int (*orig_dladdr)(const void *, Dl_info *);
 static int (*orig_statfs)(const char *, struct statfs *);
 static const struct mach_header *(*orig_dyld_get_image_header)(uint32_t);
+static uint32_t (*orig_dyld_image_count)(void);
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 
 /* dyld view: hide sensitive dylib paths from the loaded-images scan */
@@ -238,6 +256,19 @@ static const struct mach_header *my_dyld_get_image_header(uint32_t index) {
   return orig_dyld_get_image_header ? orig_dyld_get_image_header(index) : NULL;
 }
 
+/* _dyld_image_count: exclude our dylib from the count */
+static uint32_t my_dyld_image_count(void) {
+  uint32_t count = orig_dyld_image_count ? orig_dyld_image_count() : 0;
+  if (count == 0) return 0;
+  for (uint32_t i = 0; i < count; i++) {
+    const char *name = orig_dyld_get_image_name ? orig_dyld_get_image_name(i) : NULL;
+    if (name && str_is_sensitive(name)) {
+      return count - 1;
+    }
+  }
+  return count;
+}
+
 /* statfs: fake read-only rootfs to hide jailbreak */
 static int my_statfs(const char *path, struct statfs *buf) {
   int ret = orig_statfs ? orig_statfs(path, buf) : -1;
@@ -287,6 +318,87 @@ static int my_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void
 static char *my_getenv(const char *name) {
   if (name && strncmp(name, "DYLD_", 5) == 0) return NULL;
   return orig_getenv ? orig_getenv(name) : NULL;
+}
+
+/* ---------- sandbox write test blocking ---------- */
+
+static int is_sandbox_write_path(const char *path) {
+  if (!path) return 0;
+  /* Common jailbreak detection sandbox write tests */
+  if (strncmp(path, "/tmp/", 5) == 0) return 1;
+  if (strcmp(path, "/tmp") == 0) return 1;
+  if (strncmp(path, "/var/mobile/", 12) == 0) return 1;
+  if (strcmp(path, "/var/mobile") == 0) return 1;
+  if (strncmp(path, "/etc/", 5) == 0) return 1;
+  if (strcmp(path, "/etc") == 0) return 1;
+  return 0;
+}
+
+/* ---------- KRW: clean dyld_all_image_infos in the kernel-(observable) userspace struct ---------- */
+
+static void krw_clean_dyld_images(void) {
+  uint64_t myproc = proc_self();
+  if (!myproc) return;
+
+  const struct dyld_all_image_infos *infos = _dyld_get_all_image_infos();
+  if (!infos) return;
+
+  /* Read the first 3 fields: version(4) + infoArrayCount(4) + infoArray(8) */
+  uint32_t count = 0;
+  uint64_t array_addr = 0;
+  if (proc_vreadbuf(myproc, (uint8_t *)infos + 4, &count, 4) != 0) return;
+  if (proc_vreadbuf(myproc, (uint8_t *)infos + 8, &array_addr, 8) != 0) return;
+
+  if (!array_addr || count == 0) return;
+
+  /* Read the full infoArray entries */
+  size_t entry_size = 24;
+  size_t buf_size = count * entry_size;
+  uint8_t *array_buf = malloc(buf_size);
+  if (!array_buf) return;
+  if (proc_vreadbuf(myproc, (void *)array_addr, array_buf, buf_size) != 0) {
+    free(array_buf);
+    return;
+  }
+
+  /* Filter: shift non-sensitive entries forward */
+  uint32_t write_idx = 0;
+  for (uint32_t read_idx = 0; read_idx < count; read_idx++) {
+    uint64_t *entry = (uint64_t *)(array_buf + read_idx * entry_size);
+    uint64_t path_addr = entry[1]; /* imageFilePath at offset 8 */
+
+    int is_sensitive = 0;
+    if (path_addr) {
+      char path[256];
+      if (proc_vreadbuf(myproc, (void *)path_addr, path, 255) == 0) {
+        path[255] = '\0';
+        for (int i = 0; g_sensitive_kw[i]; i++) {
+          if (strstr(path, g_sensitive_kw[i])) {
+            is_sensitive = 1;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!is_sensitive) {
+      if (write_idx != read_idx) {
+        memcpy(array_buf + write_idx * entry_size,
+               array_buf + read_idx * entry_size, entry_size);
+      }
+      write_idx++;
+    }
+  }
+
+  /* Write back the compacted array */
+  if (write_idx < count) {
+    proc_vwritebuf(myproc, (void *)array_addr, array_buf,
+                   write_idx * entry_size);
+    /* Update the count via KRW */
+    proc_vwritebuf(myproc, (uint8_t *)infos + 4, &write_idx, 4);
+  }
+
+  free(array_buf);
 }
 
 /* ---------- hook engine: MSHookFunction (ElleKit/Substrate) first, fishhook fallback ---------- */
@@ -375,6 +487,7 @@ int shield_install(void) {
     const char *dladdr_n[] = {"dladdr", NULL};
     const char *statfs_n[] = {"statfs", NULL};
     const char *header_n[] = {"_dyld_get_image_header", NULL};
+    const char *imgcount_n[] = {"_dyld_image_count", NULL};
     const char *sysctl_n[] = {"sysctl", NULL};
 
     hook_one(stat_n,  (void *)my_stat,           (void **)&orig_stat);
@@ -398,6 +511,7 @@ int shield_install(void) {
     hook_one(dladdr_n,(void *)my_dladdr,       (void **)&orig_dladdr);
     hook_one(statfs_n,(void *)my_statfs,       (void **)&orig_statfs);
     hook_one(header_n,(void *)my_dyld_get_image_header, (void **)&orig_dyld_get_image_header);
+    hook_one(imgcount_n,(void *)my_dyld_image_count,   (void **)&orig_dyld_image_count);
     hook_one(sysctl_n,(void *)my_sysctl,       (void **)&orig_sysctl);
     hook_one(dlsym_n,(void *)my_dlsym,         (void **)&orig_dlsym);
 
@@ -442,6 +556,9 @@ static void jbshield_ctor(void) {
       *env[0] = '\0';
     }
   }
+
+  /* Phase 5: kernel-level dyld image hiding via KRW */
+  krw_clean_dyld_images();
 
   int r = shield_install();
 
