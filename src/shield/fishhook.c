@@ -94,7 +94,7 @@ static void _rebind_symbols_for_image(const struct mach_header *header,
         for (uint32_t j = 0; j < seg->nsects; j++) {
           struct section_64 *sect = (struct section_64 *)((uintptr_t)seg + sizeof(struct segment_command_64) + sizeof(struct section_64) * j);
           if ((sect->flags & SECTION_TYPE) == S_LAZY_DYLIB_SYMBOL_POINTERS ||
-              (sect->flags & SECTION_TYPE) == S_NON_LAZY_DYLIB_SYMBOL_POINTERS) {
+              (sect->flags & SECTION_TYPE) == S_NON_LAZY_SYMBOL_POINTERS) {
             perform_rebinding_with_section(rebindings_head, sect, slide, symtab, strtab, indirect_symtab);
           }
         }
@@ -105,7 +105,7 @@ static void _rebind_symbols_for_image(const struct mach_header *header,
   }
 }
 
-void rebind_symbols_image(void *header,
+int rebind_symbols_image(void *header,
                           intptr_t slide,
                           struct rebinding rebindings[],
                           size_t rebindings_nel) {
@@ -113,13 +113,14 @@ void rebind_symbols_image(void *header,
     struct rebindings_entry *head = NULL;
     prepend_rebindings(&head, rebindings, rebindings_nel);
     struct rebindings_entry *rebindings_head = _rebindings_head;
-    if (!rebindings_head) return;
+    if (!rebindings_head) return -1;
     _rebind_symbols_for_image((const struct mach_header *)header, slide);
     free(head->rebindings);
     free(head);
   } else {
     _rebind_symbols_for_image((const struct mach_header *)header, slide);
   }
+  return 0;
 }
 
 int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel) {
