@@ -6,13 +6,17 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/mount.h>
 #include <sys/types.h>
+#include <sys/sysctl.h>
 #include <spawn.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
-#include <sys/sysctl.h>
+#include <mach-o/ldsyms.h>
 #include "fishhook.h"
 #include "policy.h"
+
+extern char **environ;
 
 static int g_shield_ready = 0;
 
@@ -156,6 +160,9 @@ static int (*orig_posix_spawn)(pid_t *, const char *, const posix_spawn_file_act
 static int (*orig_posix_spawnp)(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *, char *const [], char *const []);
 static ssize_t (*orig_readlink)(const char *, char *, size_t);
 static int (*orig_dladdr)(const void *, Dl_info *);
+static int (*orig_statfs)(const char *, struct statfs *);
+static const struct mach_header *(*orig_dyld_get_image_header)(uint32_t);
+static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 
 /* dyld view: hide sensitive dylib paths from the loaded-images scan */
 static const char *my_dyld_get_image_name(uint32_t index) {
@@ -222,6 +229,58 @@ static int my_dladdr(const void *addr, Dl_info *info) {
     info->dli_fname = "";
   }
   return ret;
+}
+
+/* _dyld_get_image_header: hide sensitive dylib Mach-O headers */
+static const struct mach_header *my_dyld_get_image_header(uint32_t index) {
+  const char *name = orig_dyld_get_image_name ? orig_dyld_get_image_name(index) : NULL;
+  if (name && str_is_sensitive(name)) return NULL;
+  return orig_dyld_get_image_header ? orig_dyld_get_image_header(index) : NULL;
+}
+
+/* statfs: fake read-only rootfs to hide jailbreak */
+static int my_statfs(const char *path, struct statfs *buf) {
+  int ret = orig_statfs ? orig_statfs(path, buf) : -1;
+  if (ret == 0 && buf && path && (strcmp(path, "/") == 0 || shield_policy_should_hide(path))) {
+    buf->f_flags |= MNT_RDONLY;
+  }
+  return ret;
+}
+
+/* sysctl: hide jailbreak traces from KERN_PROC and sysctl queries */
+static int my_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+  if (namelen >= 2 && name[0] == CTL_KERN && name[1] == KERN_PROC && oldp && oldlenp) {
+    size_t orig_len = *oldlenp;
+    int ret = orig_sysctl ? orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+    if (ret == 0 && oldp) {
+      /* Filter out jailbreak processes */
+      char *base = (char *)oldp;
+      char *end = base + *oldlenp;
+      char *write = base;
+      struct kinfo_proc *kp = (struct kinfo_proc *)base;
+      int count = (int)(*oldlenp / sizeof(struct kinfo_proc));
+      for (int i = 0; i < count; i++) {
+        char *pname = kp[i].kp_proc.p_comm;
+        int hide = 0;
+        if (pname[0]) {
+          if (strcmp(pname, "jbevasion") == 0) hide = 1;
+          if (strstr(pname, "jailbreak") != NULL) hide = 1;
+          if (strstr(pname, "ellekit") != NULL) hide = 1;
+          if (strstr(pname, "substrate") != NULL) hide = 1;
+          if (strstr(pname, "TweakInject") != NULL) hide = 1;
+        }
+        if (!hide) {
+          if (write != (char *)&kp[i]) {
+            memmove(write, &kp[i], sizeof(struct kinfo_proc));
+          }
+          write += sizeof(struct kinfo_proc);
+        }
+      }
+      *oldlenp = (size_t)(write - base);
+    }
+    return ret;
+  }
+  return orig_sysctl ? orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen) : -1;
 }
 
 /* environment view: never let DYLD_* leak */
@@ -314,6 +373,9 @@ int shield_install(void) {
     const char *posix_spawnp_n[] = {"posix_spawnp", NULL};
     const char *readlink_n[] = {"readlink", NULL};
     const char *dladdr_n[] = {"dladdr", NULL};
+    const char *statfs_n[] = {"statfs", NULL};
+    const char *header_n[] = {"_dyld_get_image_header", NULL};
+    const char *sysctl_n[] = {"sysctl", NULL};
 
     hook_one(stat_n,  (void *)my_stat,           (void **)&orig_stat);
     hook_one(lstat_n, (void *)my_lstat,          (void **)&orig_lstat);
@@ -334,6 +396,9 @@ int shield_install(void) {
     hook_one(posix_spawnp_n,(void *)my_posix_spawnp,(void **)&orig_posix_spawnp);
     hook_one(readlink_n,(void *)my_readlink,     (void **)&orig_readlink);
     hook_one(dladdr_n,(void *)my_dladdr,       (void **)&orig_dladdr);
+    hook_one(statfs_n,(void *)my_statfs,       (void **)&orig_statfs);
+    hook_one(header_n,(void *)my_dyld_get_image_header, (void **)&orig_dyld_get_image_header);
+    hook_one(sysctl_n,(void *)my_sysctl,       (void **)&orig_sysctl);
     hook_one(dlsym_n,(void *)my_dlsym,         (void **)&orig_dlsym);
 
     g_shield_ready = 1;
@@ -370,6 +435,14 @@ int shield_install(void) {
    nobody calls shield_install explicitly in that scenario). */
 __attribute__((constructor))
 static void jbshield_ctor(void) {
+  /* Clean up environ to hide DYLD_INSERT_LIBRARIES from direct access */
+  for (char **env = environ; *env; env++) {
+    if (strncmp(*env, "DYLD_INSERT_LIBRARIES=", 22) == 0 ||
+        strncmp(*env, "DYLD_FORCE_FLAT_NAMESPACE=", 26) == 0) {
+      *env[0] = '\0';
+    }
+  }
+
   int r = shield_install();
 
   /* debug log proving injection happened */
