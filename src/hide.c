@@ -65,29 +65,10 @@ static struct {
 } g_saved_vnodes[HIDE_SAVED_MAX];
 static int g_saved_count = 0;
 
-/* Offsets of fields we must preserve from the original vnode */
-#define OFF_V_LISTFLAG      0x050
-#define OFF_V_FLAG          0x054
-#define OFF_V_LFLAG         0x058
-#define OFF_V_ITERBLKFLAGS  0x05a
-#define OFF_V_REFERENCES    0x05b
-#define OFF_V_KUSECOUNT     0x05c
-#define OFF_V_USECOUNT      0x060
-#define OFF_V_IOCOUNT       0x064
-#define OFF_V_OWNER         0x06c
+/* v_type offset in vnode struct (iOS 16/17 arm64e) */
 #define OFF_V_TYPE          0x074
-#define OFF_V_TAG           0x076
-#define OFF_V_ID            0x078
-#define OFF_V_MOUNT         0x0f8
-#define OFF_V_DATA          0x100
-#define OFF_V_LABEL         0x108
-#define OFF_V_RESOLVE       0x110
 
-/* List pointers at the start of the vnode must be preserved */
-#define OFF_V_FREELIST      0x008
-#define LIST_PTRS_SIZE      0x048  /* freelist + mntvnodes + ncchildren + nclinks + defer_reclaimlist */
-
-/* ---------- placeholder file ---------- */
+/* ---------- placeholder file (unused, kept for reference) ---------- */
 #define PLACEHOLDER_PATH  "/tmp/.jbhide_placeholder"
 
 /* ---------- helper: get vnode for a path ---------- */
@@ -120,13 +101,15 @@ int vnode_hide_cleanup(void) {
     return 0;
 }
 
-/* ---------- core: copy a replacement vnode over the original's address,
-   preserving the original's critical fields (usecount, list pointers, etc.) 
-   This is the "copy_file_in_memory" technique from jelbrekLib / KernBypass.  */
-static int vnode_swap_with_placeholder(uint64_t orig_vnode, uint64_t repl_vnode) {
-    if (!orig_vnode || !repl_vnode) {
-        fprintf(stderr, "hide: invalid vnode (orig=0x%llx repl=0x%llx)\n",
-                (unsigned long long)orig_vnode, (unsigned long long)repl_vnode);
+/* ---------- core: mark a vnode as VBAD (invalid).
+   This is much safer than swapping the entire vnode content because:
+   - we only change ONE field (v_type = 0 = VBAD)
+   - all other fields remain intact from the original
+   - the kernel handles VBAD vnodes gracefully (returns ENOENT)
+   - no risk of corrupting v_op, v_cred, v_un, v_name, etc.  */
+static int vnode_mark_bad(uint64_t orig_vnode) {
+    if (!orig_vnode) {
+        fprintf(stderr, "hide: invalid vnode\n");
         return -1;
     }
 
@@ -146,65 +129,29 @@ static int vnode_swap_with_placeholder(uint64_t orig_vnode, uint64_t repl_vnode)
         }
     }
 
-    /* Read replacement vnode */
+    /* Read the original vnode */
     uint8_t vbuf[VNODE_BUF_SIZE];
     memset(vbuf, 0, sizeof(vbuf));
-    if (krw_read_buf(repl_vnode, vbuf, sizeof(vbuf)) != 0) {
-        fprintf(stderr, "hide: failed to read replacement vnode\n");
+    if (krw_read_buf(orig_vnode, vbuf, sizeof(vbuf)) != 0) {
+        fprintf(stderr, "hide: failed to read vnode\n");
         return -1;
     }
 
-    /* Preserve critical fields from original.
-       We keep the original's list pointers, usecounts, v_mount, v_op, v_data,
-       v_label, v_resolve, v_lock, v_type, etc.  Basically everything except
-       the file-system-specific data (which is in v_data).  But we also keep
-       the original's v_data because we want the original file to still appear
-       as a valid file (just with different content). */
+    /* Remember the original v_type for logging */
+    uint16_t orig_type = *(uint16_t *)(vbuf + OFF_V_TYPE);
 
-    /* Preserve list pointers (0x008 - 0x050) */
-    uint8_t list_buf[LIST_PTRS_SIZE];
-    if (krw_read_buf(orig_vnode + OFF_V_FREELIST, list_buf, sizeof(list_buf)) != 0) {
-        fprintf(stderr, "hide: failed to read list pointers\n");
-        return -1;
-    }
-    memcpy(vbuf + OFF_V_FREELIST, list_buf, sizeof(list_buf));
+    /* Set v_type = VBAD (0).  The kernel VFS layer checks this field
+       before most operations and returns ENOENT for VBAD vnodes. */
+    *(uint16_t *)(vbuf + OFF_V_TYPE) = 0;
 
-    /* Preserve usecounts */
-    uint32_t usecount = krw_read32(orig_vnode + OFF_V_USECOUNT);
-    uint32_t iocount  = krw_read32(orig_vnode + OFF_V_IOCOUNT);
-    uint32_t kusecount = krw_read32(orig_vnode + OFF_V_KUSECOUNT);
-    memcpy(vbuf + OFF_V_KUSECOUNT, &kusecount, 4);
-    memcpy(vbuf + OFF_V_USECOUNT,  &usecount,  4);
-    memcpy(vbuf + OFF_V_IOCOUNT,   &iocount,   4);
-
-    /* Preserve original's v_type, v_tag, v_id so the file type matches */
-    uint8_t type_buf[8]; /* v_type(2) + v_tag(2) + v_id(4) */
-    if (krw_read_buf(orig_vnode + OFF_V_TYPE, type_buf, sizeof(type_buf)) != 0) return -1;
-    memcpy(vbuf + OFF_V_TYPE, type_buf, sizeof(type_buf));
-
-    /* Preserve v_mount, v_data, v_label, v_resolve */
-    uint64_t v_mount  = krw_read64(orig_vnode + OFF_V_MOUNT);
-    uint64_t v_data   = krw_read64(orig_vnode + OFF_V_DATA);
-    uint64_t v_label  = krw_read64(orig_vnode + OFF_V_LABEL);
-    uint64_t v_resolve = krw_read64(orig_vnode + OFF_V_RESOLVE);
-    memcpy(vbuf + OFF_V_MOUNT,   &v_mount,  8);
-    memcpy(vbuf + OFF_V_DATA,    &v_data,   8);
-    memcpy(vbuf + OFF_V_LABEL,   &v_label,  8);
-    memcpy(vbuf + OFF_V_RESOLVE, &v_resolve, 8);
-
-    /* Preserve v_owner, v_flag, v_lflag, v_listflag, etc. */
-    uint32_t v_listflag = krw_read32(orig_vnode + OFF_V_LISTFLAG);
-    uint32_t v_flag     = krw_read32(orig_vnode + OFF_V_FLAG);
-    uint16_t v_lflag    = krw_read16(orig_vnode + OFF_V_LFLAG);
-    memcpy(vbuf + OFF_V_LISTFLAG, &v_listflag, 4);
-    memcpy(vbuf + OFF_V_FLAG,     &v_flag,     4);
-    memcpy(vbuf + OFF_V_LFLAG,    &v_lflag,    2);
-
-    /* Write the patched vnode back to the original's address */
+    /* Write back */
     if (krw_write_buf(orig_vnode, vbuf, sizeof(vbuf)) != 0) {
         fprintf(stderr, "hide: failed to write vnode\n");
         return -1;
     }
+
+    printf("hide: vnode 0x%llx  v_type 0x%x -> VBAD\n",
+           (unsigned long long)orig_vnode, orig_type);
 
     return 0;
 }
@@ -217,16 +164,10 @@ int vnode_hide_path(const char *path) {
         return -1;
     }
 
-    uint64_t repl_vnode = get_vnode_for_path(PLACEHOLDER_PATH);
-    if (!repl_vnode) {
-        fprintf(stderr, "hide: cannot resolve placeholder vnode\n");
-        return -1;
-    }
+    printf("hide: %s  vnode=0x%llx\n",
+           path, (unsigned long long)orig_vnode);
 
-    printf("hide: %s  vnode=0x%llx  ->  placeholder vnode=0x%llx\n",
-           path, (unsigned long long)orig_vnode, (unsigned long long)repl_vnode);
-
-    int ret = vnode_swap_with_placeholder(orig_vnode, repl_vnode);
+    int ret = vnode_mark_bad(orig_vnode);
     if (ret == 0) {
         printf("hide: OK  %s\n", path);
     } else {
