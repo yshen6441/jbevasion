@@ -33,11 +33,12 @@ static int prepend_rebindings(struct rebindings_entry **rebindings_head,
 }
 
 static void perform_rebinding_with_section(struct rebindings_entry *rebindings_head,
-                                           struct section_64 *section,
-                                           intptr_t slide,
-                                           struct nlist_64 *symtab,
-                                           char *strtab,
-                                           uint32_t *indirect_symtab) {
+                                            struct section_64 *section,
+                                            intptr_t slide,
+                                            struct nlist_64 *symtab,
+                                            char *strtab,
+                                            uint32_t *indirect_symtab) {
+  if (!symtab || !strtab || !indirect_symtab) return;
   uint32_t *indirect_symbol_indices = indirect_symtab + section->reserved1;
   void **indirect_symbol_bindings = (void **)((uintptr_t)section->addr + slide);
   for (uint32_t i = 0; i < section->size / sizeof(void *); i++) {
@@ -89,6 +90,7 @@ static void _rebind_symbols_for_image(const struct mach_header *header,
         break;
       }
       case LC_SEGMENT_64: {
+        if (!symtab || !indirect_symtab) break;
         struct segment_command_64 *seg = (struct segment_command_64 *)cmd;
         if (strcmp(seg->segname, SEG_DATA) != 0 && strcmp(seg->segname, SEG_DATA_CONST) != 0) break;
         for (uint32_t j = 0; j < seg->nsects; j++) {
