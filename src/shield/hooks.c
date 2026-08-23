@@ -68,6 +68,9 @@ static int my_access(const char *path, int mode) {
   return orig_access ? orig_access(path, mode) : -1;
 }
 
+/* sandbox write test path check (forward declaration) */
+static int is_sandbox_write_path(const char *path);
+
 /* open/openat/fopen paths must also be hidden */
 static int (*orig_open)(const char *, int, ...);
 static int (*orig_openat)(int, const char *, int, ...);
