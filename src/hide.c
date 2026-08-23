@@ -1,5 +1,6 @@
 #include "hide.h"
 #include "krw.h"
+#include <libjailbreak/kernel.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
