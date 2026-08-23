@@ -165,11 +165,6 @@ static int cmd_hide(int argc, char *argv[]) {
 		return 1;
 	}
 
-	if (vnode_hide_init() != 0) {
-		printf("[-] failed to initialize vnode hiding\n");
-		return 1;
-	}
-
 	if (argc >= 3) {
 		if (is_numeric(argv[2])) {
 			/* Hide all paths + platformize target PID */
@@ -197,8 +192,6 @@ static int cmd_hide(int argc, char *argv[]) {
 		printf("========================================\n");
 		proc_hide_self();
 	}
-
-	vnode_hide_cleanup();
 
 	if (ret != 0) {
 		printf("[-] some paths failed\n");

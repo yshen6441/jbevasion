@@ -55,13 +55,13 @@
 /*  0x110   0x008  v_resolve                                           */
 /* total: 0x118 = 280 bytes                                            */
 
-/* We read/write a generous block to capture the whole vnode */
-#define VNODE_BUF_SIZE 0x200
+/* vnode struct size on iOS 16/17 arm64e */
+#define VNODE_SAVE_SIZE 0x118
 #define HIDE_SAVED_MAX 64
 
 static struct {
     uint64_t vaddr;
-    uint8_t  data[VNODE_BUF_SIZE];
+    uint8_t  data[VNODE_SAVE_SIZE];
 } g_saved_vnodes[HIDE_SAVED_MAX];
 static int g_saved_count = 0;
 
@@ -115,14 +115,14 @@ static int vnode_mark_bad(uint64_t orig_vnode) {
         return -1;
     }
 
-    /* Save original vnode content for restore */
+    /* Save original vnode content for restore (read only the vnode struct size) */
     if (g_saved_count < HIDE_SAVED_MAX) {
         int found = 0;
         for (int i = 0; i < g_saved_count; i++) {
             if (g_saved_vnodes[i].vaddr == orig_vnode) { found = 1; break; }
         }
         if (!found) {
-            uint8_t save_buf[VNODE_BUF_SIZE];
+            uint8_t save_buf[VNODE_SAVE_SIZE];
             if (krw_read_buf(orig_vnode, save_buf, sizeof(save_buf)) == 0) {
                 g_saved_vnodes[g_saved_count].vaddr = orig_vnode;
                 memcpy(g_saved_vnodes[g_saved_count].data, save_buf, sizeof(save_buf));
@@ -131,31 +131,19 @@ static int vnode_mark_bad(uint64_t orig_vnode) {
         }
     }
 
-    /* Read the original vnode */
-    uint8_t vbuf[VNODE_BUF_SIZE];
-    memset(vbuf, 0, sizeof(vbuf));
-    if (krw_read_buf(orig_vnode, vbuf, sizeof(vbuf)) != 0) {
-        fprintf(stderr, "hide: failed to read vnode\n");
-        return -1;
-    }
+    /* Read the original v_type */
+    uint16_t orig_type = krw_read16(orig_vnode + OFF_V_TYPE);
 
-    /* Remember the original v_type for logging */
-    uint16_t orig_type = *(uint16_t *)(vbuf + OFF_V_TYPE);
+    /* Atomic field writes: only modify specific fields, never write the
+       entire vnode buffer. This avoids corrupting adjacent kernel memory
+       (the vnode struct is only 0x118 bytes, we must not write beyond it). */
 
-    /* Set v_type = VBAD (0).  The kernel VFS layer checks this field
-       before most operations and returns ENOENT for VBAD vnodes. */
-    *(uint16_t *)(vbuf + OFF_V_TYPE) = 0;
+    /* Set v_type = VBAD (0). Kernel returns ENOENT for VBAD vnodes. */
+    krw_write16(orig_vnode + OFF_V_TYPE, 0);
 
-    /* Inflate usecount/iocount to prevent the kernel from recycling
-       this vnode (which would restore the original file visibility). */
-    *(uint32_t *)(vbuf + OFF_V_USECOUNT) = 0x2000;
-    *(uint32_t *)(vbuf + OFF_V_IOCOUNT)  = 0x2000;
-
-    /* Write back */
-    if (krw_write_buf(orig_vnode, vbuf, sizeof(vbuf)) != 0) {
-        fprintf(stderr, "hide: failed to write vnode\n");
-        return -1;
-    }
+    /* Inflate usecount/iocount to prevent vnode recycling */
+    krw_write32(orig_vnode + OFF_V_USECOUNT, 0x2000);
+    krw_write32(orig_vnode + OFF_V_IOCOUNT,  0x2000);
 
     printf("hide: vnode 0x%llx  v_type 0x%x -> VBAD  usecount:=0x2000\n",
            (unsigned long long)orig_vnode, orig_type);
@@ -231,7 +219,7 @@ int vnode_restore_all(void) {
     int restored = 0;
     for (int i = 0; i < g_saved_count; i++) {
         int ret = krw_write_buf(g_saved_vnodes[i].vaddr,
-                                g_saved_vnodes[i].data, VNODE_BUF_SIZE);
+                                g_saved_vnodes[i].data, VNODE_SAVE_SIZE);
         if (ret == 0) {
             printf("restore: OK  0x%llx\n",
                    (unsigned long long)g_saved_vnodes[i].vaddr);
