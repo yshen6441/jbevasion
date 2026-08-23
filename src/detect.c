@@ -244,6 +244,18 @@ static void probe_sandbox(void) {
 		"/var/mobile/Library/Preferences/com.apple.springboard.plist");
 
 	PROBE_ACCESS("access /var/mobile/Library/Preferences", "/var/mobile/Library/Preferences", R_OK);
+
+	int ofd = open("/var/jb/usr/bin/su", O_RDONLY);
+	PROBE_BOOL("open /var/jb/usr/bin/su", ofd >= 0);
+	if (ofd >= 0) close(ofd);
+
+	FILE *fjb = fopen("/var/jb/usr/bin/sudo", "r");
+	PROBE_BOOL("fopen /var/jb/usr/bin/sudo", fjb != NULL);
+	if (fjb) fclose(fjb);
+
+	int d = open("/var/jb", O_RDONLY);
+	PROBE_BOOL("open dir /var/jb", d >= 0);
+	if (d >= 0) close(d);
 }
 
 static void probe_krw(void) {

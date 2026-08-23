@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -59,6 +60,58 @@ static int my_access(const char *path, int mode) {
     return -1;
   }
   return orig_access ? orig_access(path, mode) : -1;
+}
+
+/* open/openat/fopen paths must also be hidden */
+static int (*orig_open)(const char *, int, ...);
+static int (*orig_openat)(int, const char *, int, ...);
+static int (*orig_fstatat)(int, const char *restrict, struct stat *restrict, int);
+static int (*orig_faccessat)(int, const char *, int, int);
+
+static int my_open(const char *path, int flags, ...) {
+  mode_t mode = 0;
+  if (flags & (O_CREAT | O_TMPFILE)) {
+    va_list ap;
+    va_start(ap, flags);
+    mode = va_arg(ap, mode_t);
+    va_end(ap);
+  }
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
+    errno = ENOENT;
+    return -1;
+  }
+  return orig_open ? orig_open(path, flags, mode) : -1;
+}
+
+static int my_openat(int dirfd, const char *path, int flags, ...) {
+  mode_t mode = 0;
+  if (flags & (O_CREAT | O_TMPFILE)) {
+    va_list ap;
+    va_start(ap, flags);
+    mode = va_arg(ap, mode_t);
+    va_end(ap);
+  }
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
+    errno = ENOENT;
+    return -1;
+  }
+  return orig_openat ? orig_openat(dirfd, path, flags, mode) : -1;
+}
+
+static int my_fstatat(int dirfd, const char *restrict path, struct stat *restrict buf, int flag) {
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
+    errno = ENOENT;
+    return -1;
+  }
+  return orig_fstatat ? orig_fstatat(dirfd, path, buf, flag) : -1;
+}
+
+static int my_faccessat(int dirfd, const char *path, int mode, int flag) {
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
+    errno = ENOENT;
+    return -1;
+  }
+  return orig_faccessat ? orig_faccessat(dirfd, path, mode, flag) : -1;
 }
 
 /* ---------- behavior layer hooks (Phase 3) ---------- */
@@ -174,6 +227,10 @@ int shield_install(void) {
     const char *stat64_n[] = {"stat64", NULL};
     const char *lstat64_n[] = {"lstat64", NULL};
     const char *access_n[] = {"access", NULL};
+    const char *open_n[] = {"open", NULL};
+    const char *openat_n[] = {"openat", NULL};
+    const char *fstatat_n[] = {"fstatat$INODE64", "fstatat", NULL};
+    const char *faccessat_n[] = {"faccessat", NULL};
     const char *dyname_n[] = {"_dyld_get_image_name", NULL};
     const char *dlopen_n[] = {"dlopen", NULL};
     const char *getenv_n[] = {"getenv", NULL};
@@ -183,6 +240,10 @@ int shield_install(void) {
     hook_one(stat64_n,(void *)my_stat64,         (void **)&orig_stat64);
     hook_one(lstat64_n,(void *)my_lstat64,       (void **)&orig_lstat64);
     hook_one(access_n,(void *)my_access,         (void **)&orig_access);
+    hook_one(open_n,  (void *)my_open,           (void **)&orig_open);
+    hook_one(openat_n,(void *)my_openat,         (void **)&orig_openat);
+    hook_one(fstatat_n,(void *)my_fstatat,       (void **)&orig_fstatat);
+    hook_one(faccessat_n,(void *)my_faccessat,   (void **)&orig_faccessat);
     hook_one(dyname_n,(void *)my_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
     hook_one(dlopen_n,(void *)my_dlopen,         (void **)&orig_dlopen);
     hook_one(getenv_n,(void *)my_getenv,         (void **)&orig_getenv);
