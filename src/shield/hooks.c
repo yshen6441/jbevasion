@@ -155,6 +155,7 @@ static pid_t (*orig_fork)(void);
 static int (*orig_posix_spawn)(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *, char *const [], char *const []);
 static int (*orig_posix_spawnp)(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *, char *const [], char *const []);
 static ssize_t (*orig_readlink)(const char *, char *, size_t);
+static int (*orig_dladdr)(const void *, Dl_info *);
 
 /* dyld view: hide sensitive dylib paths from the loaded-images scan */
 static const char *my_dyld_get_image_name(uint32_t index) {
@@ -212,6 +213,15 @@ static ssize_t my_readlink(const char *path, char *buf, size_t bufsize) {
     return -1;
   }
   return orig_readlink ? orig_readlink(path, buf, bufsize) : -1;
+}
+
+/* dladdr: hide sensitive dylib names from address-to-symbol lookups */
+static int my_dladdr(const void *addr, Dl_info *info) {
+  int ret = orig_dladdr ? orig_dladdr(addr, info) : 0;
+  if (ret && info && info->dli_fname && str_is_sensitive(info->dli_fname)) {
+    info->dli_fname = "";
+  }
+  return ret;
 }
 
 /* environment view: never let DYLD_* leak */
@@ -303,6 +313,7 @@ int shield_install(void) {
     const char *posix_spawn_n[] = {"posix_spawn", NULL};
     const char *posix_spawnp_n[] = {"posix_spawnp", NULL};
     const char *readlink_n[] = {"readlink", NULL};
+    const char *dladdr_n[] = {"dladdr", NULL};
 
     hook_one(stat_n,  (void *)my_stat,           (void **)&orig_stat);
     hook_one(lstat_n, (void *)my_lstat,          (void **)&orig_lstat);
@@ -322,6 +333,7 @@ int shield_install(void) {
     hook_one(posix_spawn_n,(void *)my_posix_spawn, (void **)&orig_posix_spawn);
     hook_one(posix_spawnp_n,(void *)my_posix_spawnp,(void **)&orig_posix_spawnp);
     hook_one(readlink_n,(void *)my_readlink,     (void **)&orig_readlink);
+    hook_one(dladdr_n,(void *)my_dladdr,       (void **)&orig_dladdr);
     hook_one(dlsym_n,(void *)my_dlsym,         (void **)&orig_dlsym);
 
     g_shield_ready = 1;
