@@ -319,6 +319,7 @@ int cmd_shield_test(void) {
 		printf("[-] dlsym(shield_install) failed: %s\n", dlerror());
 		return 1;
 	}
+	const char *(*shield_engine_name)(void) = dlsym(handle, "shield_engine_name");
 
 	int ret = shield_install();
 	if (ret != 0) {
@@ -326,7 +327,8 @@ int cmd_shield_test(void) {
 		return 1;
 	}
 
-	printf("[+] Shield installed, running detection probe...\n");
+	const char *eng = shield_engine_name ? shield_engine_name() : "unknown";
+	printf("[+] Shield installed (engine=%s), running detection probe...\n", eng);
 	printf("    If hooks work, /var/jb/ paths will show as 'not found'\n");
 	return cmd_detect();
 }
