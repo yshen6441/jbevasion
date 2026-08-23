@@ -5,6 +5,10 @@
 #include <mach-o/nlist.h>
 #include "fishhook.h"
 
+#ifndef SEG_DATA_CONST
+#define SEG_DATA_CONST  "__DATA_CONST"
+#endif
+
 struct rebindings_entry {
   struct rebinding *rebindings;
   size_t rebindings_nel;
@@ -17,9 +21,9 @@ static int _rebindings_successful = 0;
 static int prepend_rebindings(struct rebindings_entry **rebindings_head,
                               struct rebinding rebindings[],
                               size_t nel) {
-  struct rebindings_entry *new_entry = (struct rebindings_entry *)malloc(sizeof(struct rebindings_entry));
+  struct rebindings_entry *new_entry = malloc(sizeof(struct rebindings_entry));
   if (!new_entry) return -1;
-  new_entry->rebindings = (struct rebinding *)malloc(sizeof(struct rebinding) * nel);
+  new_entry->rebindings = malloc(sizeof(struct rebinding) * nel);
   if (!new_entry->rebindings) { free(new_entry); return -1; }
   memcpy(new_entry->rebindings, rebindings, sizeof(struct rebinding) * nel);
   new_entry->rebindings_nel = nel;
@@ -29,7 +33,7 @@ static int prepend_rebindings(struct rebindings_entry **rebindings_head,
 }
 
 static void perform_rebinding_with_section(struct rebindings_entry *rebindings_head,
-                                           section_t *section,
+                                           struct section_64 *section,
                                            intptr_t slide,
                                            struct nlist_64 *symtab,
                                            char *strtab,
@@ -61,27 +65,17 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings_h
 
 static void _rebind_symbols_for_image(const struct mach_header *header,
                                        intptr_t slide) {
-  rebind_symbols_image((void *)header, slide, NULL, 0);
-}
-
-void rebind_symbols_image(void *header,
-                          intptr_t slide,
-                          struct rebinding rebindings[],
-                          size_t rebindings_nel) {
-  struct rebindings_entry *rebindings_head = NULL;
-  if (rebindings && rebindings_nel > 0) {
-    prepend_rebindings(&rebindings_head, rebindings, rebindings_nel);
-  }
-  rebindings_head = _rebindings_head;
+  struct rebindings_entry *rebindings_head = _rebindings_head;
   if (!rebindings_head) return;
 
+  const struct mach_header_64 *header64 = (const struct mach_header_64 *)header;
   struct load_command *cmd = (struct load_command *)((uintptr_t)header + sizeof(struct mach_header_64));
+
   struct nlist_64 *symtab = NULL;
   char *strtab = NULL;
   uint32_t *indirect_symtab = NULL;
-  section_t *linkedit_symtab = NULL;
 
-  for (uint32_t i = 0; i < ((struct mach_header_64 *)header)->ncmds; i++) {
+  for (uint32_t i = 0; i < header64->ncmds; i++) {
     switch (cmd->cmd) {
       case LC_SYMTAB: {
         struct symtab_command *symtab_cmd = (struct symtab_command *)cmd;
@@ -98,7 +92,7 @@ void rebind_symbols_image(void *header,
         struct segment_command_64 *seg = (struct segment_command_64 *)cmd;
         if (strcmp(seg->segname, SEG_DATA) != 0 && strcmp(seg->segname, SEG_DATA_CONST) != 0) break;
         for (uint32_t j = 0; j < seg->nsects; j++) {
-          section_t *sect = (section_t *)((uintptr_t)seg + sizeof(struct segment_command_64) + sizeof(section_t) * j);
+          struct section_64 *sect = (struct section_64 *)((uintptr_t)seg + sizeof(struct segment_command_64) + sizeof(struct section_64) * j);
           if ((sect->flags & SECTION_TYPE) == S_LAZY_DYLIB_SYMBOL_POINTERS ||
               (sect->flags & SECTION_TYPE) == S_NON_LAZY_DYLIB_SYMBOL_POINTERS) {
             perform_rebinding_with_section(rebindings_head, sect, slide, symtab, strtab, indirect_symtab);
@@ -111,6 +105,23 @@ void rebind_symbols_image(void *header,
   }
 }
 
+void rebind_symbols_image(void *header,
+                          intptr_t slide,
+                          struct rebinding rebindings[],
+                          size_t rebindings_nel) {
+  if (rebindings && rebindings_nel > 0) {
+    struct rebindings_entry *head = NULL;
+    prepend_rebindings(&head, rebindings, rebindings_nel);
+    struct rebindings_entry *rebindings_head = _rebindings_head;
+    if (!rebindings_head) return;
+    _rebind_symbols_for_image((const struct mach_header *)header, slide);
+    free(head->rebindings);
+    free(head);
+  } else {
+    _rebind_symbols_for_image((const struct mach_header *)header, slide);
+  }
+}
+
 int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel) {
   if (prepend_rebindings(&_rebindings_head, rebindings, rebindings_nel) < 0) return -1;
   if (!_rebindings_successful) {
@@ -118,7 +129,7 @@ int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel) {
     _rebindings_successful = 1;
   } else {
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-      rebind_symbols_image((void *)_dyld_get_image_header(i), _dyld_get_image_vmaddr_slide(i), NULL, 0);
+      _rebind_symbols_for_image(_dyld_get_image_header(i), _dyld_get_image_vmaddr_slide(i));
     }
   }
   return 0;
