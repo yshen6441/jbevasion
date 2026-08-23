@@ -12,11 +12,9 @@
 #include <spawn.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
-#include <mach-o/dyld_images.h>
 #include <mach-o/ldsyms.h>
-#include <libjailbreak/primitives.h>
-#include <libjailbreak/kernel.h>
 #include "fishhook.h"
+#include "../krw.h"
 #include "policy.h"
 
 extern char **environ;
@@ -320,6 +318,25 @@ static char *my_getenv(const char *name) {
   return orig_getenv ? orig_getenv(name) : NULL;
 }
 
+/* ---------- manual dyld struct declarations (private header dyld_images.h not in SDK) ---------- */
+
+struct jb_dyld_image_info {
+  const struct mach_header *imageLoadAddress;
+  const char *imageFilePath;
+  uintptr_t imageFileModDate;
+};
+
+struct jb_dyld_all_image_infos {
+  uint32_t version;
+  uint32_t infoArrayCount;
+  const struct jb_dyld_image_info *infoArray;
+};
+
+extern const struct jb_dyld_all_image_infos *_dyld_get_all_image_infos(void);
+
+/* proc_self() is in libjailbreak util.h which pulls in jbclient_xpc.h; declare here */
+extern uint64_t proc_self(void);
+
 /* ---------- sandbox write test blocking ---------- */
 
 static int is_sandbox_write_path(const char *path) {
@@ -340,7 +357,7 @@ static void krw_clean_dyld_images(void) {
   uint64_t myproc = proc_self();
   if (!myproc) return;
 
-  const struct dyld_all_image_infos *infos = _dyld_get_all_image_infos();
+  const struct jb_dyld_all_image_infos *infos = _dyld_get_all_image_infos();
   if (!infos) return;
 
   /* Read the first 3 fields: version(4) + infoArrayCount(4) + infoArray(8) */
