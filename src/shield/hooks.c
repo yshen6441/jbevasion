@@ -136,7 +136,7 @@ int shield_install(void) {
     if (sym) g_mshook(sym, (void *)my_access, (void **)&orig_access);
 
     g_shield_ready = 1;
-    return 1;
+    return 0;
   }
 
   /* fishhook fallback; capture real pointers up front so a failed rebind stays safe */
@@ -162,5 +162,5 @@ int shield_install(void) {
   int ret = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
   g_engine = 2;
   g_shield_ready = (ret == 0);
-  return ret == 0 ? 1 : -1;
+  return ret == 0 ? 0 : -1;
 }
