@@ -111,12 +111,21 @@ static void probe_dyld(void) {
 	PROBE_BOOL("libjailbreak.dylib dlopen(RTLD_NOLOAD)", handle != NULL);
 	if (handle) dlclose(handle);
 
+	handle = dlopen("/var/jb/usr/lib/TweakInject/JailbreakShield.dylib", RTLD_NOLOAD);
+	PROBE_BOOL("JailbreakShield.dylib dlopen(RTLD_NOLOAD)", handle != NULL);
+	if (handle) dlclose(handle);
+
 	PROBE_BOOL("DYLD_INSERT_LIBRARIES set", getenv("DYLD_INSERT_LIBRARIES") != NULL);
 	if (getenv("DYLD_INSERT_LIBRARIES")) {
 		printf("  [!] DYLD_INSERT_LIBRARIES = %s\n", getenv("DYLD_INSERT_LIBRARIES"));
 	}
 	PROBE_BOOL("DYLD_FORCE_FLAT_NAMESPACE set", getenv("DYLD_FORCE_FLAT_NAMESPACE") != NULL);
 	PROBE_BOOL("CFPreferencesAppDomain set", getenv("CFPreferencesAppDomain") != NULL);
+
+	(void)dlopen("/var/jb/usr/lib/libsubstrate.dylib", RTLD_NOW);
+	handle = dlopen("/var/jb/usr/lib/libsubstrate.dylib", RTLD_NOLOAD);
+	PROBE_BOOL("libsubstrate spy-dlopen(NOLOAD) after RTLD_NOW", handle != NULL);
+	if (handle) dlclose(handle);
 }
 
 static void probe_process(void) {
