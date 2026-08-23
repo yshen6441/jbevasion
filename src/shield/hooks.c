@@ -65,6 +65,7 @@ static int my_access(const char *path, int mode) {
 /* open/openat/fopen paths must also be hidden */
 static int (*orig_open)(const char *, int, ...);
 static int (*orig_openat)(int, const char *, int, ...);
+static int (*orig_fopen)(const char *restrict, const char *restrict);
 static int (*orig_fstatat)(int, const char *restrict, struct stat *restrict, int);
 static int (*orig_faccessat)(int, const char *, int, int);
 
@@ -96,6 +97,14 @@ static int my_openat(int dirfd, const char *path, int flags, ...) {
     return -1;
   }
   return orig_openat ? orig_openat(dirfd, path, flags, mode) : -1;
+}
+
+static FILE *my_fopen(const char *restrict path, const char *restrict mode) {
+  if (g_shield_ready && path && shield_policy_should_hide(path)) {
+    errno = ENOENT;
+    return NULL;
+  }
+  return orig_fopen ? orig_fopen(path, mode) : NULL;
 }
 
 static int my_fstatat(int dirfd, const char *restrict path, struct stat *restrict buf, int flag) {
@@ -227,8 +236,9 @@ int shield_install(void) {
     const char *stat64_n[] = {"stat64", NULL};
     const char *lstat64_n[] = {"lstat64", NULL};
     const char *access_n[] = {"access", NULL};
-    const char *open_n[] = {"open", NULL};
-    const char *openat_n[] = {"openat", NULL};
+    const char *open_n[] = {"open", "open$NOCANCEL", NULL};
+    const char *openat_n[] = {"openat", "openat$NOCANCEL", NULL};
+    const char *fopen_n[] = {"fopen", NULL};
     const char *fstatat_n[] = {"fstatat$INODE64", "fstatat", NULL};
     const char *faccessat_n[] = {"faccessat", NULL};
     const char *dyname_n[] = {"_dyld_get_image_name", NULL};
@@ -242,6 +252,7 @@ int shield_install(void) {
     hook_one(access_n,(void *)my_access,         (void **)&orig_access);
     hook_one(open_n,  (void *)my_open,           (void **)&orig_open);
     hook_one(openat_n,(void *)my_openat,         (void **)&orig_openat);
+    hook_one(fopen_n, (void *)my_fopen,          (void **)&orig_fopen);
     hook_one(fstatat_n,(void *)my_fstatat,       (void **)&orig_fstatat);
     hook_one(faccessat_n,(void *)my_faccessat,   (void **)&orig_faccessat);
     hook_one(dyname_n,(void *)my_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
