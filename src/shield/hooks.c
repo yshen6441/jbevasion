@@ -14,7 +14,10 @@
 #include <mach-o/dyld.h>
 #include <mach-o/ldsyms.h>
 #include "fishhook.h"
-#include "../krw.h"
+/* libjailbreak functions declared manually (avoid pulling in <xpc/xpc.h> via kernel.h) */
+extern uint64_t proc_self(void);
+extern int proc_vreadbuf(uint64_t proc, const void *addr, void *outdata, size_t datalen);
+extern int proc_vwritebuf(uint64_t proc, const void *addr, const void *indata, size_t datalen);
 #include "policy.h"
 
 extern char **environ;
@@ -333,9 +336,6 @@ struct jb_dyld_all_image_infos {
 };
 
 extern const struct jb_dyld_all_image_infos *_dyld_get_all_image_infos(void);
-
-/* proc_self() is in libjailbreak util.h which pulls in jbclient_xpc.h; declare here */
-extern uint64_t proc_self(void);
 
 /* ---------- sandbox write test blocking ---------- */
 
