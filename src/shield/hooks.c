@@ -69,11 +69,11 @@ static int (*orig_fstatat)(int, const char *restrict, struct stat *restrict, int
 static int (*orig_faccessat)(int, const char *, int, int);
 
 static int my_open(const char *path, int flags, ...) {
-  mode_t mode = 0;
-  if (flags & (O_CREAT | O_TMPFILE)) {
+  int mode = 0;
+  if (flags & (O_CREAT | O_EXCL | O_TRUNC)) {
     va_list ap;
     va_start(ap, flags);
-    mode = va_arg(ap, mode_t);
+    mode = va_arg(ap, int);
     va_end(ap);
   }
   if (g_shield_ready && path && shield_policy_should_hide(path)) {
@@ -84,11 +84,11 @@ static int my_open(const char *path, int flags, ...) {
 }
 
 static int my_openat(int dirfd, const char *path, int flags, ...) {
-  mode_t mode = 0;
-  if (flags & (O_CREAT | O_TMPFILE)) {
+  int mode = 0;
+  if (flags & (O_CREAT | O_EXCL | O_TRUNC)) {
     va_list ap;
     va_start(ap, flags);
-    mode = va_arg(ap, mode_t);
+    mode = va_arg(ap, int);
     va_end(ap);
   }
   if (g_shield_ready && path && shield_policy_should_hide(path)) {
