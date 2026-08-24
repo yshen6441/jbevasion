@@ -19,9 +19,9 @@ static void print_usage(void) {
 	printf("Commands:\n");
 	printf("  probe <pid>        Print filedesc offsets + live field values\n");
 	printf("  vnode <path>       Resolve a path to its vnode and print flags\n");
-	printf("  chroot-prep        Mount orig-fs snapshot and prepare clean root\n");
+	printf("  chroot-prep        Build clean fake root (nullfs bind, skips jb)\n");
 	printf("  chroot <pid>       Apply fd_rdir chroot + platformize to target PID\n");
-	printf("  chroot-cleanup     Unmount the clean root snapshot\n");
+	printf("  chroot-cleanup     Unmount the fake root\n");
 	printf("  app <pid>          Platformize + clean csflags for a specific PID\n");
 	printf("  platformize        Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
 	printf("  hide               (deprecated) Per-process cleanup only\n");

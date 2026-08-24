@@ -3,21 +3,50 @@
 #include "hide.h"
 #include <libjailbreak/kernel.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/param.h>
 
-/* fs_snapshot_mount() is in <sys/snapshot.h> (iOS 10.3+). Fallback declaration
-   in case the Theos SDK doesn't expose it. */
-#if __has_include(<sys/snapshot.h>)
-#include <sys/snapshot.h>
-#else
-int fs_snapshot_mount(int dirfd, const char *mountpoint, const char *snapshot, uint32_t flags);
-#endif
+/* ------------------------------------------------------------------ */
+/*  Fake-root construction for rootless (Dopamine) jailbreaks.         */
+/*                                                                    */
+/*  On Dopamine rootless, /var/jb is a symlink to                     */
+/*  /private/preboot/<uuid>/jb and the real root tree is otherwise     */
+/*  untouched. We therefore build a clean root at JBEVASION_ROOT by    */
+/*  nullfs binding every real top-level directory, skipping the        */
+/*  jailbreak-relevant subtrees (/private/preboot, /private/var/jb)    */
+/*  so a chrooted process sees a pristine system volume.               */
+/* ------------------------------------------------------------------ */
+
+/* nullfs mount data: copyin`ed by the kernel as a uint64 flags word
+   followed by the source path string (null_vfsops.c:152-165). */
+struct nullfs_mount_data {
+    uint64_t flags;
+};
+
+#define NULLFS_FSTYPE "nullfs"
+#define MAX_MOUNTS 128
+
+static struct {
+    char path[PATH_MAX];
+} g_mounts[MAX_MOUNTS];
+static uint32_t g_mount_count = 0;
+
+static int record_mount(const char *path) {
+    if (g_mount_count >= MAX_MOUNTS) {
+        fprintf(stderr, "fd_rdir: mount stack full\n");
+        return -1;
+    }
+    strlcpy(g_mounts[g_mount_count].path, path, sizeof(g_mounts[g_mount_count].path));
+    g_mount_count++;
+    return 0;
+}
 
 /* ------------------------------------------------------------------ */
 /*  filedesc struct offsets (iOS 17 arm64e, verified against          */
@@ -59,9 +88,6 @@ static uint64_t fd_rdir_offs_rdir(void) {
 /* vnode offsets – same as hide.c, used for usecount bump only */
 #define OFF_V_USECOUNT  0x060
 #define OFF_V_IOCOUNT   0x064
-
-/* The path where we mount the clean rootfs snapshot */
-#define SNAPSHOT_NAME "orig-fs"
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -213,55 +239,230 @@ int fd_rdir_set_for_proc(uint64_t proc, uint64_t clean_vnode) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Snapshot preparation                                              */
+/*  Fake-root preparation (nullfs bind mounts)                        */
 /* ------------------------------------------------------------------ */
+
+static int mkdir_p(const char *path, mode_t mode) {
+    char tmp[PATH_MAX];
+    strlcpy(tmp, path, sizeof(tmp));
+    size_t len = strlen(tmp);
+    if (len > 0 && tmp[len - 1] == '/') tmp[len - 1] = '\0';
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
+            *p = '/';
+        }
+    }
+    if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+/* Bind-mount src onto dst (created if missing). Uses nullfs so the fake
+   root aliases the real vnode tree. */
+static int bind_mount_dir(const char *src, const char *dst) {
+    if (mkdir(dst, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "fd_rdir: mkdir(%s) failed: %s\n", dst, strerror(errno));
+        return -1;
+    }
+
+    /* nullfs data layout: uint64 flags + NUL-terminated source path */
+    size_t pathlen = strlen(src) + 1;
+    struct nullfs_mount_data *data = calloc(1, sizeof(*data) + pathlen);
+    if (!data) return -1;
+    memcpy((char *)(data + 1), src, pathlen);
+
+    int ret = mount(NULLFS_FSTYPE, dst, 0, data);
+    free(data);
+
+    if (ret != 0) {
+        fprintf(stderr, "fd_rdir: nullfs mount(%s -> %s) failed: %s\n",
+                src, dst, strerror(errno));
+        return -1;
+    }
+
+    if (record_mount(dst) != 0) {
+        unmount(dst, MNT_FORCE);
+        return -1;
+    }
+
+    printf("fd_rdir: bound %s -> %s\n", src, dst);
+    return 0;
+}
+
+/* Recreate a real symlink in the fake root. Keeps relative paths intact so
+   children resolve within the fake tree. */
+static int clone_symlink(const char *src, const char *dst) {
+    char target[PATH_MAX];
+    ssize_t n = readlink(src, target, sizeof(target) - 1);
+    if (n < 0) {
+        fprintf(stderr, "fd_rdir: readlink(%s) failed: %s\n", src, strerror(errno));
+        return -1;
+    }
+    target[n] = '\0';
+
+    if (symlink(target, dst) != 0) {
+        /* If the current component is a dir from a previous bind, remove it */
+        if (errno == EEXIST && rmdir(dst) == 0) {
+            if (symlink(target, dst) != 0) {
+                fprintf(stderr, "fd_rdir: symlink(%s) failed: %s\n", dst, strerror(errno));
+                return -1;
+            }
+        } else {
+            fprintf(stderr, "fd_rdir: symlink(%s -> %s) failed: %s\n",
+                    dst, target, strerror(errno));
+            return -1;
+        }
+    }
+    printf("fd_rdir: symlink %s -> %s\n", src, target);
+    return 0;
+}
+
+/* Is this path jailbreak-relevant and must be skipped from the fake root?
+   On rootless, /private/preboot holds the boot components + the jb root,
+   and (in some setups) /private/var/jb is the actual jailbreak dir. */
+static bool skip_path(const char *src) {
+    if (strcmp(src, "/private/preboot") == 0) return true;
+    if (strcmp(src, "/private/var/jb") == 0) return true;
+    return false;
+}
+
+/* Bind a single real directory tree into the fake root. If the live path is
+   a symlink, clone it; otherwise recurse into subdirs, skipping jailbreak
+   paths, and bind mount leaf dirs. */
+static int bind_tree(const char *src, const char *dst) {
+    struct stat st;
+    if (lstat(src, &st) != 0) {
+        fprintf(stderr, "fd_rdir: lstat(%s) failed: %s\n", src, strerror(errno));
+        return -1;
+    }
+
+    if (S_ISLNK(st.st_mode)) return clone_symlink(src, dst);
+
+    if (S_ISDIR(st.st_mode)) {
+        if (strcmp(src, "/") == 0) {
+            /* Walk top-level entries, cloning symlinks and binding dirs */
+            DIR *d = opendir(src);
+            if (!d) return -1;
+            struct dirent *de;
+            while ((de = readdir(d)) != NULL) {
+                if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+                char child[PATH_MAX], cchild[PATH_MAX];
+                snprintf(child, sizeof(child), "%s%s", src, de->d_name);
+                snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
+                if (skip_path(child)) continue;
+                struct stat cst;
+                if (lstat(child, &cst) != 0) continue;
+                if (S_ISLNK(cst.st_mode)) {
+                    clone_symlink(child, cchild);
+                } else if (S_ISDIR(cst.st_mode)) {
+                    bind_tree(child, cchild);
+                } else if (S_ISREG(cst.st_mode)) {
+                    if (mkdir_p(cchild, 0755) != 0) continue;
+                    bind_mount_dir(child, cchild);
+                }
+            }
+            closedir(d);
+            return 0;
+        }
+
+        if (strcmp(src, "/private") == 0) {
+            /* Special: only mount /private/var (excluding jb) and /private/etc.
+               preboot is skipped inside the loop via skip_path(). */
+            DIR *d = opendir(src);
+            if (!d) return -1;
+            struct dirent *de;
+            while ((de = readdir(d)) != NULL) {
+                if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+                char child[PATH_MAX], cchild[PATH_MAX];
+                snprintf(child, sizeof(child), "%s/%s", src, de->d_name);
+                snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
+                if (skip_path(child)) continue;
+                struct stat cst;
+                if (lstat(child, &cst) != 0) continue;
+                if (S_ISLNK(cst.st_mode)) {
+                    clone_symlink(child, cchild);
+                } else if (S_ISDIR(cst.st_mode)) {
+                    bind_tree(child, cchild);
+                } else if (S_ISREG(cst.st_mode)) {
+                    if (mkdir_p(cchild, 0755) != 0) continue;
+                    bind_mount_dir(child, cchild);
+                }
+            }
+            closedir(d);
+            return 0;
+        }
+
+        if (strcmp(src, "/private/var") == 0) {
+            /* Special: exclude /private/var/jb */
+            DIR *d = opendir(src);
+            if (!d) return -1;
+            struct dirent *de;
+            while ((de = readdir(d)) != NULL) {
+                if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+                char child[PATH_MAX], cchild[PATH_MAX];
+                snprintf(child, sizeof(child), "%s/%s", src, de->d_name);
+                snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
+                if (skip_path(child)) continue;
+                struct stat cst;
+                if (lstat(child, &cst) != 0) continue;
+                if (S_ISLNK(cst.st_mode)) {
+                    clone_symlink(child, cchild);
+                } else if (S_ISDIR(cst.st_mode)) {
+                    if (mkdir_p(cchild, 0755) != 0) continue;
+                    bind_mount_dir(child, cchild);
+                } else if (S_ISREG(cst.st_mode)) {
+                    if (mkdir_p(cchild, 0755) != 0) continue;
+                    bind_mount_dir(child, cchild);
+                }
+            }
+            closedir(d);
+            return 0;
+        }
+
+        /* Generic dir: bind as a whole */
+        if (mkdir_p(dst, 0755) != 0) return -1;
+        return bind_mount_dir(src, dst);
+    }
+
+    /* Non-dir, non-symlink (device nodes, fifos): skip. /dev is populated
+       dynamically and apps rarely need chrooted device access. */
+    return 0;
+}
+
 int fd_rdir_prepare(void) {
-    /* Check if already mounted */
+    /* If the fake root root was previously set up, reuse it (idempotent) */
     struct stat st;
     if (stat(JBEVASION_ROOT, &st) == 0 && S_ISDIR(st.st_mode)) {
-        /* Try to see if it's a mount point by checking if /private exists */
         char testpath[PATH_MAX];
         snprintf(testpath, sizeof(testpath), "%s/private", JBEVASION_ROOT);
         if (stat(testpath, &st) == 0 && S_ISDIR(st.st_mode)) {
-            printf("fd_rdir: clean root already mounted at %s\n", JBEVASION_ROOT);
+            printf("fd_rdir: clean root already prepared at %s\n", JBEVASION_ROOT);
             return 0;
         }
     }
 
+    g_mount_count = 0;
+
     printf("fd_rdir: preparing clean root at %s\n", JBEVASION_ROOT);
 
-    /* Create the mountpoint directory */
     if (mkdir(JBEVASION_ROOT, 0755) != 0 && errno != EEXIST) {
         fprintf(stderr, "fd_rdir: mkdir(%s) failed: %s\n",
                 JBEVASION_ROOT, strerror(errno));
         return -1;
     }
 
-    /* Open the root filesystem for snapshot operations */
-    int root_fd = open("/", O_RDONLY | O_NONBLOCK);
-    if (root_fd < 0) {
-        fprintf(stderr, "fd_rdir: open(/) failed: %s\n", strerror(errno));
+    if (bind_tree("/", JBEVASION_ROOT) != 0) {
+        fprintf(stderr, "fd_rdir: bind_tree failed\n");
+        fd_rdir_cleanup();
         return -1;
     }
 
-    /* Try to mount the orig-fs snapshot */
-    int ret = fs_snapshot_mount(root_fd, JBEVASION_ROOT, SNAPSHOT_NAME, 0);
-    if (ret != 0) {
-        fprintf(stderr, "fd_rdir: fs_snapshot_mount(%s) failed: %d (%s)\n",
-                SNAPSHOT_NAME, ret, strerror(errno));
-        close(root_fd);
-        return -1;
-    }
+    printf("fd_rdir: clean root prepared (%u mounts)\n", g_mount_count);
 
-    close(root_fd);
-    printf("fd_rdir: mounted snapshot '%s' at %s\n", SNAPSHOT_NAME, JBEVASION_ROOT);
-
-    /* The clean root snapshot is mounted. Note: the target app will not
-       see /var data (its app container) because the snapshot has a clean
-       /var. To fix this, we need to hardlink /var files into the snapshot
-       using copy_file_in_memory() (KernBypass approach). This is a
-       future enhancement. For now, the chroot hides jailbreak files but
-       the app may crash if it needs /var data. */
+    /* Note: /var/private data (app containers) is reachable via the bound
+       /private/var/mobile tree, so app-scoped storage survives the chroot.
+       /tmp, /etc resolve through cloned symlinks into /private. */
 
     return 0;
 }
@@ -306,27 +507,22 @@ int fd_rdir_apply(pid_t pid) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Cleanup: unmount the snapshot                                     */
+/*  Cleanup: unmount the fake root (reverse mount order)              */
 /* ------------------------------------------------------------------ */
 int fd_rdir_cleanup(void) {
-    printf("fd_rdir: cleaning up\n");
+    printf("fd_rdir: cleaning up (%u mounts)\n", g_mount_count);
 
-    /* Try to unmount the snapshot – ignore errors if already unmounted */
-    int ret = unmount(JBEVASION_ROOT, MNT_FORCE);
-    if (ret != 0 && errno != EINVAL && errno != ENOENT) {
-        fprintf(stderr, "fd_rdir: unmount(%s) failed: %s\n",
-                JBEVASION_ROOT, strerror(errno));
-        /* Continue anyway – try rmdir */
-    } else {
-        printf("fd_rdir: unmounted %s\n", JBEVASION_ROOT);
+    for (int i = g_mount_count - 1; i >= 0; i--) {
+        int ret = unmount(g_mounts[i].path, MNT_FORCE);
+        if (ret != 0 && errno != EINVAL && errno != ENOENT) {
+            fprintf(stderr, "fd_rdir: unmount(%s) failed: %s\n",
+                    g_mounts[i].path, strerror(errno));
+        } else {
+            printf("fd_rdir: unmounted %s\n", g_mounts[i].path);
+        }
+        g_mounts[i].path[0] = '\0';
     }
-
-    ret = rmdir(JBEVASION_ROOT);
-    if (ret != 0 && errno != ENOENT) {
-        fprintf(stderr, "fd_rdir: rmdir(%s) failed: %s\n",
-                JBEVASION_ROOT, strerror(errno));
-        return -1;
-    }
+    g_mount_count = 0;
 
     printf("fd_rdir: cleanup done\n");
     return 0;

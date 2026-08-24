@@ -7,13 +7,14 @@
 
 #define JBEVASION_ROOT "/tmp/jbevasion_root"
 
-/* Mount the orig-fs snapshot and prepare the clean root for chroot */
+/* Build the clean fake root at JBEVASION_ROOT by nullfs-binding the real
+   root tree, excluding jailbreak paths (/private/preboot, /private/var/jb) */
 int fd_rdir_prepare(void);
 
 /* Apply fd_rdir chroot to a target PID */
 int fd_rdir_apply(pid_t pid);
 
-/* Unmount and clean up */
+/* Unmount the fake root */
 int fd_rdir_cleanup(void);
 
 /* Low-level: write fd_rdir/fd_cdir + FD_CHROOT into a proc's filedesc */
