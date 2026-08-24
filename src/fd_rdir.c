@@ -376,6 +376,59 @@ static int overlay_writable_tmpfs(void) {
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Diagnostic battery for the tmpfs overlay EIO.                      */
+/*                                                                    */
+/*  Determines whether the tmpfs mount on the read-only mirror fails  */
+/*  because (a) tmpfs mount data/flag semantics differ from bindfs,   */
+/*  or (b) mounting on top of a vnode already covered by a bindfs     */
+/*  mount is rejected by VFS. Each case unmounts immediately.         */
+/* ------------------------------------------------------------------ */
+static void diag_run(const char *label, const char *type, const char *dst,
+                     int flags, const char *data) {
+    uint64_t saved = 0;
+    jbclient_root_steal_ucred(0, &saved);
+    int r = mount(type, dst, flags, (void *)data);
+    int err = errno;
+    if (saved) jbclient_root_steal_ucred(saved, NULL);
+    if (r == 0) {
+        printf("  [ OK ]  %-26s %-7s %s\n", label, type, dst);
+        unmount(dst, MNT_FORCE);
+    } else {
+        printf("  [FAIL]  %-26s %-7s %s: %s\n", label, type, dst, strerror(err));
+    }
+}
+
+int fd_rdir_diag_mount(void) {
+    printf("fd_rdir: diag-mount (needs 'jbevasion chroot-prep' run once)\n");
+    printf("  tmpfs on plain real dir     -> isolates tmpfs data/flags issues\n");
+    printf("  tmpfs on mirror (bindfs-cover) -> isolates covered-vnode issue\n");
+
+    mkdir("/tmp/jbdiag_1", 0755);
+    diag_run("tmpfs NULL data, real dir", "tmpfs", "/tmp/jbdiag_1", 0, NULL);
+
+    mkdir("/tmp/jbdiag_2", 0755);
+    diag_run("tmpfs size-data, real dir", "tmpfs", "/tmp/jbdiag_2", 0, "size=262144");
+
+    diag_run("tmpfs NULL, mirror /var/tmp", "tmpfs",
+             JBEVASION_ROOT "/private/var/tmp", 0, NULL);
+
+    diag_run("tmpfs flags, mirror Data", "tmpfs",
+             JBEVASION_ROOT "/private/var/mobile/Containers/Data",
+             MNT_DONTBROWSE | MNT_NOSUID, NULL);
+
+    mkdir("/tmp/jbdiag_5", 0755);
+    diag_run("bindfs, real dir (ctrl)", "bindfs", "/tmp/jbdiag_5", 0, "/private/var/tmp");
+
+    diag_run("bindfs on covered mirror vnode", "bindfs",
+             JBEVASION_ROOT "/private/var", 0, "/private/var/tmp");
+
+    diag_run("tmpfs NULL, over holder mount", "tmpfs", JBEVASION_HOLDER, 0, NULL);
+
+    printf("fd_rdir: diag-mount done\n");
+    return 0;
+}
+
 /* Recreate a real symlink in the fake root. Keeps relative paths intact so
    children resolve within the fake tree. */
 static int clone_symlink(const char *src, const char *dst) {

@@ -25,6 +25,11 @@ int fd_rdir_unchroot(pid_t pid);
 /* Unmount the fake root */
 int fd_rdir_cleanup(void);
 
+/* Diagnostic: exercise mount(2) variants (tmpfs/bindfs, data/flags,
+   plain-dir vs bindfs-covered mirror target) to root-cause the tmpfs
+   overlay EIO. Each case unmounts immediately. */
+int fd_rdir_diag_mount(void);
+
 /* Low-level: write fd_rdir/fd_cdir + FD_CHROOT into a proc's filedesc */
 int fd_rdir_set_for_proc(uint64_t proc, uint64_t clean_vnode);
 

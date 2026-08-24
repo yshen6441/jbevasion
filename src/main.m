@@ -23,6 +23,7 @@ static void print_usage(void) {
 	printf("  chroot <pid>       Apply fd_rdir chroot + platformize to target PID\n");
 	printf("  unchroot <pid>     Clear FD_CHROOT, restore rdir=NULL on target PID\n");
 	printf("  chroot-cleanup     Unmount the fake root\n");
+	printf("  diag-mount         Mount(2) diagnostic battery for tmpfs overlay EIO\n");
 	printf("  app <pid>          Platformize + clean csflags for a specific PID\n");
 	printf("  platformize        Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
 	printf("  hide               (deprecated) Per-process cleanup only\n");
@@ -271,6 +272,20 @@ static int cmd_chroot_cleanup(void) {
     return 0;
 }
 
+static int cmd_diag_mount(void) {
+    int ret = krw_init();
+    if (ret != 0) {
+        printf("[-] krw_init failed (%d)\n", ret);
+        return 1;
+    }
+    ret = fd_rdir_diag_mount();
+    if (ret != 0) {
+        printf("[-] diag-mount failed\n");
+        return 1;
+    }
+    return 0;
+}
+
 static int cmd_unchroot(int argc, char *argv[]) {
     if (argc < 3) {
         printf("[-] usage: jbevasion unchroot <pid>\n");
@@ -355,6 +370,8 @@ int main(int argc, char *argv[]) {
 		return cmd_unchroot(argc, argv);
 	} else if (strcmp(cmd, "chroot-cleanup") == 0) {
 		return cmd_chroot_cleanup();
+	} else if (strcmp(cmd, "diag-mount") == 0) {
+		return cmd_diag_mount();
 	} else if (strcmp(cmd, "hide") == 0) {
 		return cmd_hide(argc, argv);
 	} else if (strcmp(cmd, "restore") == 0) {
