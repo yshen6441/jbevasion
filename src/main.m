@@ -373,9 +373,11 @@ static int cmd_respring(void) {
 	printf("respring: killing SpringBoard to rescan icon model...\n");
 
 	pid_t pid = 0;
-	char *const args[] = {
-		"/usr/bin/killall", "-SEGV", "SpringBoard", NULL,
-	};
+	char *args[4];
+	args[0] = "/usr/bin/killall";
+	args[1] = "-SEGV";
+	args[2] = "SpringBoard";
+	args[3] = NULL;
 	const char *jb_killall = "/var/jb/usr/bin/killall";
 	if (access(jb_killall, X_OK) == 0) {
 		/* rootless: real killall lives under /var/jb */
