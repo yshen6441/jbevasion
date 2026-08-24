@@ -481,7 +481,13 @@ static int bind_children(const char *src, const char *dst) {
     while ((de = readdir(d)) != NULL) {
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
         char child[PATH_MAX], cchild[PATH_MAX];
-        snprintf(child, sizeof(child), "%s/%s", src, de->d_name);
+        /* Top-level walk starts at "/": join without a leading slash to keep
+           child paths canonical ("/usr", "/private"), otherwise the
+           strcmp-based special cases below never match. */
+        if (src[0] == '/' && src[1] == '\0')
+            snprintf(child, sizeof(child), "%s%s", src, de->d_name);
+        else
+            snprintf(child, sizeof(child), "%s/%s", src, de->d_name);
         snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
         if (skip_path(child)) continue;
         struct stat cst;
