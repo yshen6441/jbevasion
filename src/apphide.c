@@ -16,6 +16,9 @@
 
 extern char **environ;
 
+/* Callback for main.m to install a better LS refresh (ObjC _LSRefresh + respring) */
+void (*apphide_ls_refresh_callback)(void) = NULL;
+
 static void refresh_ls_all(void);
 
 /* JB paths (rootless). The jailbroken apps live here. */
@@ -464,6 +467,12 @@ static const char *find_uicache(void) {
 }
 
 static void refresh_ls_all(void) {
+    /* If main.m installed a better callback (LSApplicationWorkspace _LSRefresh + respring), use it. */
+    if (apphide_ls_refresh_callback) {
+        apphide_ls_refresh_callback();
+        return;
+    }
+    /* Fallback: uicache -a as mobile. */
     const char *uc = find_uicache();
     if (!uc) {
         fprintf(stderr, "apphide: no uicache found; icon refresh needs a reboot\n");

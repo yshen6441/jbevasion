@@ -13,6 +13,8 @@
 
 #include <spawn.h>
 #include <sys/wait.h>
+#include <objc/runtime.h>
+#include <objc/message.h>
 
 extern char **environ;
 
@@ -363,6 +365,49 @@ static int cmd_platformize(void) {
 	return proc_hide_self();
 }
 
+/* TrollStore‑style LS refresh: call LSApplicationWorkspace _LSRefresh
+ * (private API) then killall -9 SpringBoard. No lsd/csstore access. */
+static void ls_refresh_callback_impl(void) {
+	printf("apphide: calling LSApplicationWorkspace _LSRefresh...\n");
+	Class lsClass = objc_getClass("LSApplicationWorkspace");
+	if (lsClass) {
+		id workspace = ((id (*)(id, SEL))objc_msgSend)
+			((id)lsClass, sel_registerName("defaultWorkspace"));
+		if (workspace) {
+			SEL refreshSel = sel_registerName("_LSRefresh");
+			if (class_respondsToSelector(lsClass, refreshSel)) {
+				((void (*)(id, SEL))objc_msgSend)
+					(workspace, refreshSel);
+				printf("apphide: _LSRefresh done, respringing…\n");
+			} else {
+				fprintf(stderr, "apphide: _LSRefresh not found, "
+					"falling back to killall lsd\n");
+				/* Fallback: kill lsd so launchd restarts it cleanly. */
+				pid_t lsdpid = 0;
+				char *ka[] = { (char*)"/usr/bin/killall", "-9", "lsd", NULL };
+				const char *jbk = "/var/jb/usr/bin/killall";
+				if (access(jbk, X_OK) == 0) ka[0] = (char *)jbk;
+				posix_spawn(&lsdpid, ka[0], NULL, NULL, ka, environ);
+			}
+		}
+	}
+
+	/* respring SpringBoard (‑9, same as TrollStore) */
+	pid_t sbpid = 0;
+	char *args[4];
+	args[0] = "/usr/bin/killall";
+	args[1] = "-9";
+	args[2] = "SpringBoard";
+	args[3] = NULL;
+	const char *jb_killall = "/var/jb/usr/bin/killall";
+	if (access(jb_killall, X_OK) == 0)
+		args[0] = (char *)jb_killall;
+	/* spawn & don't wait – SpringBoard dies immediately */
+	posix_spawn(&sbpid, args[0], NULL, NULL, args, environ);
+	/* the process exits normally after this; SpringBoard respawns by launchd */
+	printf("apphide: SpringBoard restarted, icons updated.\n");
+}
+
 /* Safe userspace respring: restart SpringBoard so the icon model rescans.
  * This is NOT a kernel operation, does not touch vnodes/mounts, and cannot
  * panic — worst case is the UI goes black for a second and comes back. */
@@ -377,7 +422,7 @@ static int cmd_respring(void) {
 	pid_t pid = 0;
 	char *args[4];
 	args[0] = "/usr/bin/killall";
-	args[1] = "-SEGV";
+	args[1] = "-9";
 	args[2] = "SpringBoard";
 	args[3] = NULL;
 	const char *jb_killall = "/var/jb/usr/bin/killall";
@@ -405,6 +450,9 @@ static int cmd_respring(void) {
 }
 
 int main(int argc, char *argv[]) {
+	/* Register the LS refresh callback for apphide (TrollStore-style _LSRefresh + respring) */
+	apphide_ls_refresh_callback = ls_refresh_callback_impl;
+
 	if (argc < 2) {
 		print_usage();
 		return 0;

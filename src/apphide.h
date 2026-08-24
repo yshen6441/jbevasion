@@ -31,4 +31,8 @@ int apphide_unhide_all(void);
  * without touching lsd or the csstore caches. */
 int apphide_refresh_ls(void);
 
+/* The caller (main.m) may install a better refresh function that calls
+ * LSApplicationWorkspace _LSRefresh + respring instead of uicache -a. */
+extern void (*apphide_ls_refresh_callback)(void);
+
 #endif
