@@ -51,9 +51,13 @@ static int record_mount(const char *path) {
    sandbox. Dopamine uses the same pattern (jbctl/src/internal.m). */
 static int mount_unsandboxed(const char *type, const char *dir, int flags, void *data) {
     uint64_t saved = 0;
-    jbclient_root_steal_ucred(0, &saved);
+    int steal_ret = jbclient_root_steal_ucred(0, &saved);
     int r = mount(type, dir, flags, data);
     if (saved) jbclient_root_steal_ucred(saved, NULL);
+    if (r != 0) {
+        fprintf(stderr, "  [mount_unsandboxed] steal=%d saved=0x%llx errno=%d\n",
+                steal_ret, (unsigned long long)saved, errno);
+    }
     return r;
 }
 
