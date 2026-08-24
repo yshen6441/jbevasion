@@ -70,30 +70,21 @@ static int ensure_dir(const char *path, mode_t mode) {
     return 0;
 }
 
-/* Check if app_path matches any protected bundle ID by reading Info.plist. */
+static char *read_bundle_id(const char *app_dir);
+
+/* Check if app_path matches any protected bundle ID by reading Info.plist
+ * via CoreFoundation (handles both XML and binary plist formats). */
 static bool is_protected_app(const char *app_path) {
-    char info_path[PATH_MAX];
-    snprintf(info_path, sizeof(info_path), "%s/Info.plist", app_path);
-    if (!file_exists(info_path)) return false;
-    /* Read the file into memory and search for the bundle ID string. */
-    FILE *f = fopen(info_path, "rb");
-    if (!f) return false;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *buf = malloc(len + 1);
-    if (!buf) { fclose(f); return false; }
-    size_t nread = fread(buf, 1, len, f);
-    fclose(f);
-    buf[nread] = '\0';
+    char *bid = read_bundle_id(app_path);
+    if (!bid) return false;
     bool matched = false;
     for (int i = 0; protect_ids[i]; i++) {
-        if (strstr(buf, protect_ids[i]) != NULL) {
+        if (strcmp(bid, protect_ids[i]) == 0) {
             matched = true;
             break;
         }
     }
-    free(buf);
+    free(bid);
     return matched;
 }
 
