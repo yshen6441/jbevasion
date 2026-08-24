@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <CoreFoundation/CoreFoundation.h>
 
 /* JB paths (rootless). The jailbroken apps live here. */
