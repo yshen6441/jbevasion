@@ -3,7 +3,6 @@
 #include "hide.h"
 #include <libjailbreak/kernel.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -19,19 +18,19 @@
 /*  On Dopamine rootless, /var/jb is a symlink to                     */
 /*  /private/preboot/<uuid>/jb and the real root tree is otherwise     */
 /*  untouched. We therefore build a clean root at JBEVASION_ROOT by    */
-/*  nullfs binding every real top-level directory, skipping the        */
+/*  bindfs binding every real top-level directory, skipping the        */
 /*  jailbreak-relevant subtrees (/private/preboot, /private/var/jb)    */
 /*  so a chrooted process sees a pristine system volume.               */
 /* ------------------------------------------------------------------ */
 
-/* nullfs mount data: copyin`ed by the kernel as a uint64 flags word
-   followed by the source path string (null_vfsops.c:152-165). */
-struct nullfs_mount_data {
-    uint64_t flags;
-};
-
-#define NULLFS_FSTYPE "nullfs"
+/* bindfs is Apple's private bind-mount filesystem, used by Dopamine
+   itself (jbctl/src/internal.m). mount data is just the source path
+   as a NUL-terminated string pointer. */
+#define BINDFS_FSTYPE  "bindfs"
 #define MAX_MOUNTS 128
+
+/* libjailbreak API: steal kernel ucred to bypass sandbox for mount */
+extern int jbclient_root_steal_ucred(uint64_t ucredToSteal, uint64_t *orgUcred);
 
 static struct {
     char path[PATH_MAX];
@@ -46,6 +45,16 @@ static int record_mount(const char *path) {
     strlcpy(g_mounts[g_mount_count].path, path, sizeof(g_mounts[g_mount_count].path));
     g_mount_count++;
     return 0;
+}
+
+/* Steal the kernel (pid 0) ucred so the mount() syscall bypasses the
+   sandbox. Dopamine uses the same pattern (jbctl/src/internal.m). */
+static int mount_unsandboxed(const char *type, const char *dir, int flags, void *data) {
+    uint64_t saved = 0;
+    jbclient_root_steal_ucred(0, &saved);
+    int r = mount(type, dir, flags, data);
+    if (saved) jbclient_root_steal_ucred(saved, NULL);
+    return r;
 }
 
 /* ------------------------------------------------------------------ */
@@ -239,7 +248,7 @@ int fd_rdir_set_for_proc(uint64_t proc, uint64_t clean_vnode) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Fake-root preparation (nullfs bind mounts)                        */
+/*  Fake-root preparation (bindfs bind mounts)                        */
 /* ------------------------------------------------------------------ */
 
 static int mkdir_p(const char *path, mode_t mode) {
@@ -258,25 +267,20 @@ static int mkdir_p(const char *path, mode_t mode) {
     return 0;
 }
 
-/* Bind-mount src onto dst (created if missing). Uses nullfs so the fake
-   root aliases the real vnode tree. */
+/* Bind-mount src onto dst (created if missing). Uses bindfs (Apple's
+   private bind-mount filesystem, confirmed working on iOS 17 via
+   Dopamine's jbctl/src/internal.m). */
 static int bind_mount_dir(const char *src, const char *dst) {
     if (mkdir(dst, 0755) != 0 && errno != EEXIST) {
         fprintf(stderr, "fd_rdir: mkdir(%s) failed: %s\n", dst, strerror(errno));
         return -1;
     }
 
-    /* nullfs data layout: uint64 flags + NUL-terminated source path */
-    size_t pathlen = strlen(src) + 1;
-    struct nullfs_mount_data *data = calloc(1, sizeof(*data) + pathlen);
-    if (!data) return -1;
-    memcpy((char *)(data + 1), src, pathlen);
-
-    int ret = mount(NULLFS_FSTYPE, dst, 0, data);
-    free(data);
+    /* bindfs mount data is just a NUL-terminated source path string pointer */
+    int ret = mount_unsandboxed(BINDFS_FSTYPE, dst, 0, (void *)src);
 
     if (ret != 0) {
-        fprintf(stderr, "fd_rdir: nullfs mount(%s -> %s) failed: %s\n",
+        fprintf(stderr, "fd_rdir: bindfs mount(%s -> %s) failed: %s\n",
                 src, dst, strerror(errno));
         return -1;
     }

@@ -7,7 +7,7 @@
 
 #define JBEVASION_ROOT "/tmp/jbevasion_root"
 
-/* Build the clean fake root at JBEVASION_ROOT by nullfs-binding the real
+/* Build the clean fake root at JBEVASION_ROOT by bindfs-binding the real
    root tree, excluding jailbreak paths (/private/preboot, /private/var/jb) */
 int fd_rdir_prepare(void);
 

@@ -62,3 +62,7 @@ uint64_t proc_get_vnode_for_fd(uint64_t proc, int fd) { (void)proc; (void)fd; re
 uint64_t proc_ucred(uint64_t proc) { (void)proc; return 0; }
 
 char *get_jbroot(void) { return NULL; }
+
+/* --- jbclient_xpc.h --- */
+int jbclient_root_steal_ucred(uint64_t ucredToSteal, uint64_t *orgUcred)
+{ (void)ucredToSteal; (void)orgUcred; return -1; }
