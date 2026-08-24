@@ -335,54 +335,19 @@ static int ensure_holder_mount(void) {
    root is read-only. A chrooted app then cannot write its sandbox container
    or runtime temp files, crashes in a loop, and FrontBoard/runningboardd
    restarting it storms task lifecycle code (observed task use-after-free
-   panic: zone_require failed, expected proc_task). Overlay tmpfs (writable,
-   RAM-backed) on the paths apps write to so a chrooted app behaves normally. */
-static int mount_tmpfs_unsandboxed(const char *dst) {
-    /* dst must already exist: it lives inside a bindfs mirror of the real
-       (read-only) tree, so we must not mkdir it – the root files backing it
-       are read-only and mkdir would fail with EROFS. The mirror already
-       contains these paths because they exist on the real volume. */
-    uint64_t saved = 0;
-    jbclient_root_steal_ucred(0, &saved);
-    int ret = mount("tmpfs", dst, 0, NULL);
-    if (saved) jbclient_root_steal_ucred(saved, NULL);
-    if (ret != 0) {
-        if (errno == EBUSY) {
-            printf("fd_rdir: tmpfs already mounted on %s\n", dst);
-            return 0;
-        }
-        fprintf(stderr, "fd_rdir: tmpfs mount(%s) failed: %s\n", dst, strerror(errno));
-        return -1;
-    }
-    if (record_mount(dst) != 0) {
-        unmount(dst, MNT_FORCE);
-        return -1;
-    }
-    printf("fd_rdir: tmpfs overlay on %s (writable)\n", dst);
-    return 0;
-}
-
-static int overlay_writable_tmpfs(void) {
-    /* App data containers + runtime scratch, in the fake root. */
-    const char *paths[] = {
-        JBEVASION_ROOT "/private/var/mobile/Containers/Data",
-        JBEVASION_ROOT "/private/var/tmp",
-    };
-    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-        if (mount_tmpfs_unsandboxed(paths[i]) != 0) {
-            fprintf(stderr, "fd_rdir: skipping writable overlay for %s\n", paths[i]);
-        }
-    }
-    return 0;
-}
+   panic: zone_require failed, expected proc_task).
+   On iOS 17.0 the tmpfs kext (com.apple.filesystems.tmpfs) rejects userland
+   mount(2) entirely (data==NULL -> EIO, any string data -> EINVAL, no system
+   tmpfs mount exists), so we do not overlay a writable filesystem. Instead
+   the paths apps write to are NOT bindfs-mirrored at all: they become real
+   (writable) directories in the fake root, so a chrooted app initializes its
+   container on first launch (see is_writable_placeholder / bind_tree). */
 
 /* ------------------------------------------------------------------ */
-/*  Diagnostic battery for the tmpfs overlay EIO.                      */
+/*  Diagnostic battery for mount(2) behavior.                          */
 /*                                                                    */
-/*  Determines whether the tmpfs mount on the read-only mirror fails  */
-/*  because (a) tmpfs mount data/flag semantics differ from bindfs,   */
-/*  or (b) mounting on top of a vnode already covered by a bindfs     */
-/*  mount is rejected by VFS. Each case unmounts immediately.         */
+/*  Originally built to root-cause the tmpfs overlay EIO. Kept as a   */
+/*  general mount() sanity check. Each case unmounts immediately.     */
 /* ------------------------------------------------------------------ */
 static void diag_run(const char *label, const char *type, const char *dst,
                      int flags, const char *data) {
@@ -484,9 +449,60 @@ static bool skip_path(const char *src) {
     return false;
 }
 
+/* Paths a chrooted app writes to. bindfs forces MNT_RDONLY so these must
+   NOT be bindfs-mirrored; instead they become real (writable) empty dirs in
+   the fake root and the app re-initializes its container on first launch. */
+static bool is_writable_placeholder(const char *src) {
+    if (strcmp(src, "/private/var/tmp") == 0) return true;
+    if (strncmp(src, "/private/var/", 13) == 0 && strstr(src, "/Containers/Data") != NULL)
+        return true;
+    return false;
+}
+
+/* Directories that must be walked recursively (not bound as a whole) so the
+   writable-placeholder handling above reaches every level. */
+static bool deep_traverse_dir(const char *src) {
+    if (strcmp(src, "/private/var/mobile") == 0) return true;
+    if (strcmp(src, "/private/var/mobile/Containers") == 0) return true;
+    return false;
+}
+
+static int bind_tree(const char *src, const char *dst);
+
+/* Clone symlinks and recurse into every child of src under dst. */
+static int bind_children(const char *src, const char *dst) {
+    if (mkdir_p(dst, 0755) != 0) return -1;
+    DIR *d = opendir(src);
+    if (!d) {
+        fprintf(stderr, "fd_rdir: opendir(%s) failed: %s\n", src, strerror(errno));
+        return -1;
+    }
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        char child[PATH_MAX], cchild[PATH_MAX];
+        snprintf(child, sizeof(child), "%s/%s", src, de->d_name);
+        snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
+        if (skip_path(child)) continue;
+        struct stat cst;
+        if (lstat(child, &cst) != 0) continue;
+        if (S_ISLNK(cst.st_mode)) {
+            clone_symlink(child, cchild);
+        } else if (S_ISDIR(cst.st_mode)) {
+            bind_tree(child, cchild);
+        } else if (S_ISREG(cst.st_mode)) {
+            if (mkdir_p(cchild, 0755) != 0) continue;
+            bind_mount_dir(child, cchild);
+        }
+    }
+    closedir(d);
+    return 0;
+}
+
 /* Bind a single real directory tree into the fake root. If the live path is
-   a symlink, clone it; otherwise recurse into subdirs, skipping jailbreak
-   paths, and bind mount leaf dirs. */
+   a symlink, clone it; writable-placeholder paths become real (writable)
+   empty dirs; /, /private, /private/var and container dirs are walked
+   recursively; everything else is bind-mounted as a whole. */
 static int bind_tree(const char *src, const char *dst) {
     struct stat st;
     if (lstat(src, &st) != 0) {
@@ -497,84 +513,15 @@ static int bind_tree(const char *src, const char *dst) {
     if (S_ISLNK(st.st_mode)) return clone_symlink(src, dst);
 
     if (S_ISDIR(st.st_mode)) {
-        if (strcmp(src, "/") == 0) {
-            /* Walk top-level entries, cloning symlinks and binding dirs */
-            DIR *d = opendir(src);
-            if (!d) return -1;
-            struct dirent *de;
-            while ((de = readdir(d)) != NULL) {
-                if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
-                char child[PATH_MAX], cchild[PATH_MAX];
-                snprintf(child, sizeof(child), "%s%s", src, de->d_name);
-                snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
-                if (skip_path(child)) continue;
-                struct stat cst;
-                if (lstat(child, &cst) != 0) continue;
-                if (S_ISLNK(cst.st_mode)) {
-                    clone_symlink(child, cchild);
-                } else if (S_ISDIR(cst.st_mode)) {
-                    bind_tree(child, cchild);
-                } else if (S_ISREG(cst.st_mode)) {
-                    if (mkdir_p(cchild, 0755) != 0) continue;
-                    bind_mount_dir(child, cchild);
-                }
-            }
-            closedir(d);
+        if (is_writable_placeholder(src)) {
+            if (mkdir_p(dst, 0755) != 0) return -1;
+            printf("fd_rdir: real writable dir %s (not bindfs)\n", dst);
             return 0;
         }
 
-        if (strcmp(src, "/private") == 0) {
-            /* Special: only mount /private/var (excluding jb) and /private/etc.
-               preboot is skipped inside the loop via skip_path(). */
-            DIR *d = opendir(src);
-            if (!d) return -1;
-            struct dirent *de;
-            while ((de = readdir(d)) != NULL) {
-                if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
-                char child[PATH_MAX], cchild[PATH_MAX];
-                snprintf(child, sizeof(child), "%s/%s", src, de->d_name);
-                snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
-                if (skip_path(child)) continue;
-                struct stat cst;
-                if (lstat(child, &cst) != 0) continue;
-                if (S_ISLNK(cst.st_mode)) {
-                    clone_symlink(child, cchild);
-                } else if (S_ISDIR(cst.st_mode)) {
-                    bind_tree(child, cchild);
-                } else if (S_ISREG(cst.st_mode)) {
-                    if (mkdir_p(cchild, 0755) != 0) continue;
-                    bind_mount_dir(child, cchild);
-                }
-            }
-            closedir(d);
-            return 0;
-        }
-
-        if (strcmp(src, "/private/var") == 0) {
-            /* Special: exclude /private/var/jb */
-            DIR *d = opendir(src);
-            if (!d) return -1;
-            struct dirent *de;
-            while ((de = readdir(d)) != NULL) {
-                if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
-                char child[PATH_MAX], cchild[PATH_MAX];
-                snprintf(child, sizeof(child), "%s/%s", src, de->d_name);
-                snprintf(cchild, sizeof(cchild), "%s/%s", dst, de->d_name);
-                if (skip_path(child)) continue;
-                struct stat cst;
-                if (lstat(child, &cst) != 0) continue;
-                if (S_ISLNK(cst.st_mode)) {
-                    clone_symlink(child, cchild);
-                } else if (S_ISDIR(cst.st_mode)) {
-                    if (mkdir_p(cchild, 0755) != 0) continue;
-                    bind_mount_dir(child, cchild);
-                } else if (S_ISREG(cst.st_mode)) {
-                    if (mkdir_p(cchild, 0755) != 0) continue;
-                    bind_mount_dir(child, cchild);
-                }
-            }
-            closedir(d);
-            return 0;
+        if (strcmp(src, "/") == 0 || strcmp(src, "/private") == 0 ||
+            strcmp(src, "/private/var") == 0 || deep_traverse_dir(src)) {
+            return bind_children(src, dst);
         }
 
         /* Generic dir: bind as a whole */
@@ -597,7 +544,7 @@ int fd_rdir_prepare(void) {
             printf("fd_rdir: clean root already prepared at %s\n", JBEVASION_ROOT);
             int r = ensure_holder_mount();
             if (r != 0) return r;
-            return overlay_writable_tmpfs();
+            return 0;
         }
     }
 
@@ -628,8 +575,9 @@ int fd_rdir_prepare(void) {
     int r = ensure_holder_mount();
     if (r != 0) return r;
 
-    /* bindfs makes everything read-only; give apps writable containers. */
-    return overlay_writable_tmpfs();
+    /* Writable paths (/private/var/tmp, app Containers/Data) are real
+       directories in the fake root by construction (see bind_tree). */
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */

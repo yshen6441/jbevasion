@@ -5,12 +5,12 @@
 #include <sys/types.h>
 #include <stdbool.h>
 
-#define JBEVASION_ROOT "/tmp/jbevasion_root"
+#define JBEVASION_ROOT "/tmp/jbevasion_root_rw"
 
 /* A persistent bindfs mount of JBEVASION_ROOT. The mount holds a kernel
    vnode_ref on the fake-root vnode (bind_vfsops.c bindfs_mount), so the
    vnode we store in fd_rdir survives after our process closes its fd. */
-#define JBEVASION_HOLDER "/tmp/jbevasion_root_holder"
+#define JBEVASION_HOLDER "/tmp/jbevasion_root_rw_holder"
 
 /* Build the clean fake root at JBEVASION_ROOT by bindfs-binding the real
    root tree, excluding jailbreak paths (/private/preboot, /private/var/jb) */
