@@ -94,51 +94,36 @@ static uint64_t fd_rdir_offs_rdir(void) {
     return ofiles ? ofiles + FD_OFILES_TO_RDIR : 0x50;
 }
 
-/* vnode offsets – same as hide.c, used for usecount bump only */
-#define OFF_V_USECOUNT  0x060
-#define OFF_V_IOCOUNT   0x064
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
 
-/* Get the vnode for a path by changing directory and reading fd_cdir.
-   This avoids needing a vnode_lookup() kcall. */
+/* Get the vnode for a path by opening a file descriptor and reading
+   the vnode from the fileproc. The open fd keeps the vnode alive
+   with a proper kernel-managed reference while we hold it. */
 uint64_t fd_rdir_get_vnode_for_path(const char *path) {
-    char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) return 0;
-
-    if (chdir(path) != 0) {
-        fprintf(stderr, "fd_rdir: chdir(%s) failed: %s\n", path, strerror(errno));
+    int fd = open(path, O_RDONLY, 0);
+    if (fd < 0) {
+        fprintf(stderr, "fd_rdir: open(%s) failed: %s\n", path, strerror(errno));
         return 0;
     }
 
     uint64_t proc = krw_proc_self();
     if (!proc) {
-        chdir(cwd);
+        close(fd);
         return 0;
     }
 
-    /* NOTE: on iOS 16+/iOS 17 (xnu-8792) `proc->p_fd` is an INLINE
-       struct filedesc, not a pointer. The filedesc lives at
-       proc + koffsetof(proc, fd); do NOT dereference it. */
-    uint64_t filedesc = proc + koffsetof(proc, fd);
-    if (!filedesc) {
-        chdir(cwd);
+    uint64_t vp = krw_proc_vnode_for_fd(proc, fd);
+    close(fd);
+    if (!vp) {
+        fprintf(stderr, "fd_rdir: failed to get vnode for fd %d\n", fd);
         return 0;
     }
 
-    uint64_t vp = krw_read64(filedesc + fd_rdir_offs_cdir());
-
-    /* Bump usecount/iocount so the vnode doesn't get recycled while we use it */
-    if (vp) {
-        uint32_t usecount = krw_read32(vp + OFF_V_USECOUNT);
-        uint32_t iocount  = krw_read32(vp + OFF_V_IOCOUNT);
-        krw_write32(vp + OFF_V_USECOUNT, usecount + 1);
-        krw_write32(vp + OFF_V_IOCOUNT,  iocount + 1);
-    }
-
-    chdir(cwd);
+    /* The vnode is kept alive by the bindfs mount's persistent reference
+       to its root vnode (the mount holds a vnode_ref). Closing the fd is
+       safe; the mount's reference outlives this process. */
     return vp;
 }
 
@@ -226,23 +211,18 @@ int fd_rdir_set_for_proc(uint64_t proc, uint64_t clean_vnode) {
     printf("fd_rdir: old  cdir=0x%llx  rdir=0x%llx  flags=0x%x\n",
            (unsigned long long)old_cdir, (unsigned long long)old_rdir, old_flags);
 
-    /* Write the clean vnode to both cdir and rdir */
-    krw_write64(filedesc + fd_rdir_offs_cdir(), clean_vnode);
+    /* Write the clean vnode to rdir only. Kernel's chroot(2) does NOT
+       change fd_cdir; we keep the process's current working directory
+       intact so the kernel's vnode_rele lifecycle on the old cdir is
+       undisturbed. */
     krw_write64(filedesc + fd_rdir_offs_rdir(), clean_vnode);
 
     /* Set FD_CHROOT flag to prevent escape via .. */
     uint8_t new_flags = old_flags | FD_CHROOT;
     krw_write8(filedesc + OFF_FD_FLAGS, new_flags);
 
-    /* Bump usecount on the clean vnode so it stays alive */
-    uint32_t usecount = krw_read32(clean_vnode + OFF_V_USECOUNT);
-    uint32_t iocount  = krw_read32(clean_vnode + OFF_V_IOCOUNT);
-    krw_write32(clean_vnode + OFF_V_USECOUNT, usecount + 1);
-    krw_write32(clean_vnode + OFF_V_IOCOUNT,  iocount + 1);
-
-    printf("fd_rdir: wrote cdir=rdir=0x%llx  flags=0x%x (FD_CHROOT set)  "
-           "vnode usecount was %u\n",
-           (unsigned long long)clean_vnode, new_flags, usecount);
+    printf("fd_rdir: wrote rdir=0x%llx  flags=0x%x (FD_CHROOT set)\n",
+           (unsigned long long)clean_vnode, new_flags);
 
     return 0;
 }
