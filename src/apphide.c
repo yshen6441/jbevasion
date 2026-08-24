@@ -47,48 +47,30 @@ static const char *protect_ids[] = {
     NULL,
 };
 
-/* Check if app_path matches any protected bundle ID. */
+/* Check if app_path matches any protected bundle ID by reading Info.plist. */
 static bool is_protected_app(const char *app_path) {
     char info_path[PATH_MAX];
     snprintf(info_path, sizeof(info_path), "%s/Info.plist", app_path);
     if (!file_exists(info_path)) return false;
-    /* Read CFBundleIdentifier from Info.plist via CoreFoundation. */
-    CFStringRef pathStr = CFStringCreateWithCString(
-        kCFAllocatorDefault, info_path, kCFStringEncodingUTF8);
-    if (!pathStr) return false;
-    CFURLRef url = CFURLCreateWithFileSystemPath(
-        kCFAllocatorDefault, pathStr, kCFURLPOSIXPathStyle, false);
-    CFRelease(pathStr);
-    if (!url) return false;
-    CFReadStreamRef stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
-    CFRelease(url);
-    if (!stream) return false;
-    CFReadStreamOpen(stream);
-    CFPropertyListRef plist = CFPropertyListCreateWithStream(
-        kCFAllocatorDefault, stream, 0, kCFPropertyListImmutable, NULL, NULL);
-    CFReadStreamClose(stream);
-    CFRelease(stream);
-    if (!plist || CFDictionaryGetTypeID() != CFGetTypeID(plist)) {
-        if (plist) CFRelease(plist);
-        return false;
-    }
-    CFDictionaryRef dict = (CFDictionaryRef)plist;
-    CFStringRef key = CFSTR("CFBundleIdentifier");
-    CFStringRef val = CFDictionaryGetValue(dict, key);
+    /* Read the file into memory and search for the bundle ID string. */
+    FILE *f = fopen(info_path, "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc(len + 1);
+    if (!buf) { fclose(f); return false; }
+    size_t nread = fread(buf, 1, len, f);
+    fclose(f);
+    buf[nread] = '\0';
     bool matched = false;
-    if (val && CFStringGetTypeID() == CFGetTypeID(val)) {
-        char buf[256];
-        if (CFStringGetCString((CFStringRef)val, buf, sizeof(buf),
-                               kCFStringEncodingUTF8)) {
-            for (int i = 0; protect_ids[i]; i++) {
-                if (strcmp(buf, protect_ids[i]) == 0) {
-                    matched = true;
-                    break;
-                }
-            }
+    for (int i = 0; protect_ids[i]; i++) {
+        if (strstr(buf, protect_ids[i]) != NULL) {
+            matched = true;
+            break;
         }
     }
-    CFRelease(plist);
+    free(buf);
     return matched;
 }
 
