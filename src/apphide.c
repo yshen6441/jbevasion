@@ -52,22 +52,44 @@ static bool is_protected_app(const char *app_path) {
     char info_path[PATH_MAX];
     snprintf(info_path, sizeof(info_path), "%s/Info.plist", app_path);
     if (!file_exists(info_path)) return false;
-    /* Read CFBundleIdentifier from Info.plist via plutil. */
-    char cmd[PATH_MAX + 80];
-    snprintf(cmd, sizeof(cmd),
-             "/usr/bin/plutil -extract CFBundleIdentifier raw %s 2>/dev/null",
-             info_path);
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return false;
-    char buf[256];
-    if (!fgets(buf, sizeof(buf), fp)) { pclose(fp); return false; }
-    pclose(fp);
-    size_t l = strlen(buf);
-    while (l > 0 && (buf[l-1] == '\n' || buf[l-1] == '\r')) buf[--l] = '\0';
-    for (int i = 0; protect_ids[i]; i++) {
-        if (strcmp(buf, protect_ids[i]) == 0) return true;
+    /* Read CFBundleIdentifier from Info.plist via CoreFoundation. */
+    CFStringRef pathStr = CFStringCreateWithCString(
+        kCFAllocatorDefault, info_path, kCFStringEncodingUTF8);
+    if (!pathStr) return false;
+    CFURLRef url = CFURLCreateWithFileSystemPath(
+        kCFAllocatorDefault, pathStr, kCFURLPOSIXPathStyle, false);
+    CFRelease(pathStr);
+    if (!url) return false;
+    CFReadStreamRef stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+    CFRelease(url);
+    if (!stream) return false;
+    CFReadStreamOpen(stream);
+    CFPropertyListRef plist = CFPropertyListCreateWithStream(
+        kCFAllocatorDefault, stream, 0, kCFPropertyListImmutable, NULL, NULL);
+    CFReadStreamClose(stream);
+    CFRelease(stream);
+    if (!plist || CFDictionaryGetTypeID() != CFGetTypeID(plist)) {
+        if (plist) CFRelease(plist);
+        return false;
     }
-    return false;
+    CFDictionaryRef dict = (CFDictionaryRef)plist;
+    CFStringRef key = CFSTR("CFBundleIdentifier");
+    CFStringRef val = CFDictionaryGetValue(dict, key);
+    bool matched = false;
+    if (val && CFStringGetTypeID() == CFGetTypeID(val)) {
+        char buf[256];
+        if (CFStringGetCString((CFStringRef)val, buf, sizeof(buf),
+                               kCFStringEncodingUTF8)) {
+            for (int i = 0; protect_ids[i]; i++) {
+                if (strcmp(buf, protect_ids[i]) == 0) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
+    }
+    CFRelease(plist);
+    return matched;
 }
 
 /* ------------------------------------------------------------------ */
