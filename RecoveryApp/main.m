@@ -65,6 +65,7 @@ static int run_as_root(const char *path, char *const argv[]) {
     NSLog(@"jbevasion at /var/jb/usr/bin/jbevasion: %s", access("/var/jb/usr/bin/jbevasion", X_OK) == 0 ? "YES" : "NO");
     NSLog(@"jbevasion at /usr/bin/jbevasion: %s", access("/usr/bin/jbevasion", X_OK) == 0 ? "YES" : "NO");
     NSLog(@"stash dir /var/jb/.jbevasion_apphide: %s", access("/var/jb/.jbevasion_apphide", F_OK) == 0 ? "EXISTS" : "NOT FOUND");
+    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     UIViewController *vc = [[UIViewController alloc] init];
     vc.view.backgroundColor = UIColor.systemBackgroundColor;
 
