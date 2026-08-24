@@ -47,6 +47,29 @@ static const char *protect_ids[] = {
     NULL,
 };
 
+/* ------------------------------------------------------------------ */
+/*  Small helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+static bool file_exists(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+static bool is_dir(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int ensure_dir(const char *path, mode_t mode) {
+    if (is_dir(path)) return 0;
+    if (mkdir(path, mode) != 0 && errno != EEXIST) {
+        fprintf(stderr, "apphide: mkdir(%s) failed: %s\n", path, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
 /* Check if app_path matches any protected bundle ID by reading Info.plist. */
 static bool is_protected_app(const char *app_path) {
     char info_path[PATH_MAX];
@@ -72,29 +95,6 @@ static bool is_protected_app(const char *app_path) {
     }
     free(buf);
     return matched;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Small helpers                                                      */
-/* ------------------------------------------------------------------ */
-
-static bool file_exists(const char *path) {
-    struct stat st;
-    return stat(path, &st) == 0;
-}
-
-static bool is_dir(const char *path) {
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-static int ensure_dir(const char *path, mode_t mode) {
-    if (is_dir(path)) return 0;
-    if (mkdir(path, mode) != 0 && errno != EEXIST) {
-        fprintf(stderr, "apphide: mkdir(%s) failed: %s\n", path, strerror(errno));
-        return -1;
-    }
-    return 0;
 }
 
 /* Read the CFBundleIdentifier out of an Info.plist using CoreFoundation.
