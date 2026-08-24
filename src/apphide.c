@@ -16,6 +16,8 @@
 
 extern char **environ;
 
+static void refresh_ls_all(void);
+
 /* JB paths (rootless). The jailbroken apps live here. */
 #define JB_APPS_DIR   "/var/jb/Applications"
 #define STASH_DIR     "/var/jb/.jbevasion_apphide"
@@ -188,7 +190,6 @@ static int hide_app_path(const char *app_path) {
         fclose(mf);
     }
     printf("apphide: hidden %s -> %s\n", app_path, dst);
-    printf("apphide: SpringBoard will drop the icon on next rescan (or respring).\n");
     return 0;
 }
 
@@ -291,6 +292,8 @@ int apphide_hide(const char *bundle_id) {
     }
     int rc = hide_app_path(app_path);
     free(app_path);
+    if (rc == 0) refresh_ls_all();
+    printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
     return rc;
 }
 
@@ -307,7 +310,12 @@ int apphide_unhide(const char *bundle_id) {
         free(app_path);
         return 0;
     }
-    return unhide_by_name(bundle_id);
+    int rc = unhide_by_name(bundle_id);
+    if (rc == 0) {
+        refresh_ls_all();
+        printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
+    }
+    return rc;
 }
 
 int apphide_unhide_all(void) {
@@ -330,6 +338,10 @@ int apphide_unhide_all(void) {
         unhide_by_name(names[i]);
     }
     printf("apphide: restored %d hidden app(s)\n", n);
+    if (n > 0) {
+        refresh_ls_all();
+        printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
+    }
     return 0;
 }
 
@@ -351,6 +363,10 @@ int apphide_hide_all(void) {
     }
     closedir(d);
     printf("apphide: hidden %d app(s)\n", count);
+    if (count > 0) {
+        refresh_ls_all();
+        printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
+    }
     return 0;
 }
 
@@ -400,104 +416,67 @@ int apphide_hide_known(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Icon resync without rebooting                                     */
+/*  LS registration refresh (icons without reboot)                    */
 /* ------------------------------------------------------------------ */
 
-/* LaunchServices keeps a csstore cache of every registered app. Killing
- * lsd without letting it rewrite the cache means SpringBoard's icon model
- * still lists the (now stashed) apps. We move the csstore files aside so
- * lsd re-builds the launch database from a fresh directory scan. */
-static int backup_ls_csstore(void) {
-    const char *cache_dir = "/var/mobile/Library/Caches";
-    char backup_dir[PATH_MAX];
-    snprintf(backup_dir, sizeof(backup_dir), "%s/ls-cache", STASH_DIR);
-    ensure_dir(backup_dir, 0700);
-
-    DIR *d = opendir(cache_dir);
-    if (!d) {
-        /* Nothing to move if caches are not accessible; lsd rebuilds anyway. */
-        fprintf(stderr, "apphide: cannot open %s (%s)\n",
-                cache_dir, strerror(errno));
-        return 0;
+/* Run uicache as the mobile user so LaunchServices rebuilds its
+ * per-user registration database from a fresh directory scan of
+ * /var/jb/Applications. Bundles we stashed are gone from disk, so they
+ * drop out of the icon model. Running as mobile matters: the SpringBoard
+ * icon database is the mobile user's LS cache, not root's. */
+static int run_uicache(char *const args[], char *errbuf, size_t errsz) {
+    pid_t child = fork();
+    if (child < 0) {
+        fprintf(stderr, "apphide: fork failed: %s\n", strerror(errno));
+        return -1;
+    }
+    if (child == 0) {
+        setgid(501);
+        setuid(501);
+        execv(args[0], args);
+        _exit(127);
     }
 
-    int moved = 0;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        if (strncmp(ent->d_name, "com.apple.LaunchServices-", 26) == 0) {
-            char src[PATH_MAX], dst[PATH_MAX];
-            snprintf(src, sizeof(src), "%s/%s", cache_dir, ent->d_name);
-            snprintf(dst, sizeof(dst), "%s/%s", backup_dir, ent->d_name);
-            if (rename(src, dst) == 0) {
-                printf("apphide: moved LS cache %s\n", ent->d_name);
-                moved++;
-            }
-        }
-    }
-    closedir(d);
-    printf("apphide: stashed %d LaunchServices csstore cache(s)\n", moved);
-    return moved >= 0 ? 0 : -1;
-}
+    int status = 0;
+    waitpid(child, &status, 0);
 
-/* Kill lsd by bundle id via launchctl so launchd restarts it cleanly.
- * lsd re-registers installed apps on startup, re-scanning /var/jb/Applications
- * which no longer contains the hidden .app bundles. */
-static int kill_lsd(void) {
-    /* launchctl kickstart is the clean way: restart the service in place. */
-    pid_t pid = 0;
-    char *args[] = {
-        (char *)"/bin/launchctl", "kickstart", "-k",
-        "system/com.apple.coreservices.lsd",
-        NULL,
-    };
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-    int r = posix_spawn(&pid, args[0], NULL, &attr, args, environ);
-    posix_spawnattr_destroy(&attr);
-    if (r != 0) {
-        /* Fall back to killing the process directly. */
-        fprintf(stderr, "apphide: launchctl kickstart failed, trying killall\n");
-        pid = 0;
-        char *kill_args[] = { (char *)"/usr/bin/killall", "-9", "lsd", NULL };
-        const char *jb_killall = "/var/jb/usr/bin/killall";
-        if (access(jb_killall, X_OK) == 0)
-            kill_args[0] = (char *)jb_killall;
-        posix_spawnattr_init(&attr);
-        r = posix_spawn(&pid, kill_args[0], NULL, &attr, kill_args, environ);
-        posix_spawnattr_destroy(&attr);
-        if (r != 0) {
-            fprintf(stderr, "apphide: killall lsd failed: %s\n", strerror(errno));
-            return -1;
-        }
+    if (errbuf && errsz) errbuf[0] = '\0';
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        fprintf(stderr, "apphide: uicache exited with status %d\n", rc);
+        return rc;
     }
     return 0;
 }
 
-int apphide_resync_icons(void) {
-    printf("apphide: resyncing SpringBoard icon model without a full reboot...\n");
-    printf("apphide: 1/3 clearing LaunchServices csstore cache\n");
-    backup_ls_csstore();
-
-    printf("apphide: 2/3 restarting lsd to re-register apps\n");
-    kill_lsd();
-
-    /* Give lsd a moment to build the new launch database, then respring. */
-    sleep(2);
-    printf("apphide: 3/3 respringing SpringBoard\n");
-    pid_t pid = 0;
-    char *args[] = { (char *)"/usr/bin/killall", "-SEGV", "SpringBoard", NULL };
-    const char *jb_killall = "/var/jb/usr/bin/killall";
-    if (access(jb_killall, X_OK) == 0)
-        args[0] = (char *)jb_killall;
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-    int r = posix_spawn(&pid, args[0], NULL, &attr, args, environ);
-    posix_spawnattr_destroy(&attr);
-    if (r != 0) {
-        fprintf(stderr, "apphide: respring failed: %s\n", strerror(errno));
-        return -1;
+static const char *find_uicache(void) {
+    static const char *candidates[] = {
+        "/var/jb/usr/bin/uicache",
+        "/var/jb/usr/bin/uicache-strapped",
+        "/usr/bin/uicache",
+        NULL,
+    };
+    for (int i = 0; candidates[i]; i++) {
+        if (access(candidates[i], X_OK) == 0)
+            return candidates[i];
     }
-    printf("apphide: done - icons will reflect the stash on the next screen.\n");
+    return NULL;
+}
+
+static void refresh_ls_all(void) {
+    const char *uc = find_uicache();
+    if (!uc) {
+        fprintf(stderr, "apphide: no uicache found; icon refresh needs a reboot\n");
+        return;
+    }
+    printf("apphide: refreshing LaunchServices with %s -a (as mobile)...\n", uc);
+    char *args[] = { (char *)uc, "-a", NULL };
+    run_uicache(args, NULL, 0);
+}
+
+int apphide_refresh_ls(void) {
+    printf("apphide: resyncing LaunchServices registration (safe, no csstore/lsd touch)\n");
+    refresh_ls_all();
+    printf("apphide: LS refreshed - run 'jbevasion respring' to update icons.\n");
     return 0;
 }
