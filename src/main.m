@@ -3,8 +3,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <sys/param.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/sysctl.h>
@@ -382,19 +380,14 @@ static void kill_lsd_and_csstore(void) {
 }
 
 static void remove_csstore_files(void) {
-	const char *csdir = "/var/mobile/Library/Caches";
-	DIR *d = opendir(csdir);
-	if (!d) return;
-	struct dirent *de;
-	while ((de = readdir(d)) != NULL) {
-		if (strncmp(de->d_name, "com.apple.LaunchServices-", 25) == 0) {
-			char path[PATH_MAX];
-			snprintf(path, sizeof(path), "%s/%s", csdir, de->d_name);
-			unlink(path);
-			printf("apphide: removed %s\n", path);
-		}
-	}
-	closedir(d);
+	pid_t pid = 0;
+	char *args[] = { (char*)"/var/jb/usr/bin/sh", "-c",
+		"rm -f /var/mobile/Library/Caches/com.apple.LaunchServices-*.csstore",
+		NULL };
+	const char *jbsh = "/var/jb/bin/sh";
+	if (access(jbsh, X_OK) == 0) args[0] = (char *)jbsh;
+	posix_spawn(&pid, args[0], NULL, NULL, args, environ);
+	waitpid(pid, NULL, 0);
 }
 
 static void ls_refresh_callback_impl(void) {
