@@ -338,15 +338,19 @@ static int ensure_holder_mount(void) {
    panic: zone_require failed, expected proc_task). Overlay tmpfs (writable,
    RAM-backed) on the paths apps write to so a chrooted app behaves normally. */
 static int mount_tmpfs_unsandboxed(const char *dst) {
-    if (mkdir(dst, 0755) != 0 && errno != EEXIST) {
-        fprintf(stderr, "fd_rdir: mkdir(%s) failed: %s\n", dst, strerror(errno));
-        return -1;
-    }
+    /* dst must already exist: it lives inside a bindfs mirror of the real
+       (read-only) tree, so we must not mkdir it – the root files backing it
+       are read-only and mkdir would fail with EROFS. The mirror already
+       contains these paths because they exist on the real volume. */
     uint64_t saved = 0;
     jbclient_root_steal_ucred(0, &saved);
     int ret = mount("tmpfs", dst, 0, NULL);
     if (saved) jbclient_root_steal_ucred(saved, NULL);
     if (ret != 0) {
+        if (errno == EBUSY) {
+            printf("fd_rdir: tmpfs already mounted on %s\n", dst);
+            return 0;
+        }
         fprintf(stderr, "fd_rdir: tmpfs mount(%s) failed: %s\n", dst, strerror(errno));
         return -1;
     }
@@ -365,10 +369,6 @@ static int overlay_writable_tmpfs(void) {
         JBEVASION_ROOT "/private/var/tmp",
     };
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-        if (is_mountpoint(paths[i])) {
-            printf("fd_rdir: %s already overlaid\n", paths[i]);
-            continue;
-        }
         if (mount_tmpfs_unsandboxed(paths[i]) != 0) {
             fprintf(stderr, "fd_rdir: skipping writable overlay for %s\n", paths[i]);
         }
