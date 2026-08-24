@@ -49,11 +49,11 @@ int fs_snapshot_mount(int dirfd, const char *mountpoint, const char *snapshot, u
 
 static uint64_t fd_rdir_offs_cdir(void) {
     uint64_t ofiles = koffsetof(filedesc, ofiles_start);
-    return ofiles ? ofiles + FD_OFILES_TO_CDIR : 0x50;
+    return ofiles ? ofiles + FD_OFILES_TO_CDIR : 0x48;
 }
 static uint64_t fd_rdir_offs_rdir(void) {
     uint64_t ofiles = koffsetof(filedesc, ofiles_start);
-    return ofiles ? ofiles + FD_OFILES_TO_RDIR : 0x58;
+    return ofiles ? ofiles + FD_OFILES_TO_RDIR : 0x50;
 }
 
 /* vnode offsets – same as hide.c, used for usecount bump only */
@@ -84,7 +84,10 @@ uint64_t fd_rdir_get_vnode_for_path(const char *path) {
         return 0;
     }
 
-    uint64_t filedesc = krw_read64(proc + koffsetof(proc, fd));
+    /* NOTE: on iOS 16+/iOS 17 (xnu-8792) `proc->p_fd` is an INLINE
+       struct filedesc, not a pointer. The filedesc lives at
+       proc + koffsetof(proc, fd); do NOT dereference it. */
+    uint64_t filedesc = proc + koffsetof(proc, fd);
     if (!filedesc) {
         chdir(cwd);
         return 0;
@@ -113,9 +116,10 @@ int fd_rdir_probe(pid_t pid) {
         return -1;
     }
 
-    uint64_t filedesc = krw_read64(proc + koffsetof(proc, fd));
+    /* iOS 17: proc->p_fd is an inline filedesc, not a pointer */
+    uint64_t filedesc = proc + koffsetof(proc, fd);
     if (!filedesc) {
-        fprintf(stderr, "fd_rdir: failed to read filedesc from pid %d\n", pid);
+        fprintf(stderr, "fd_rdir: failed to locate filedesc in pid %d proc\n", pid);
         return -1;
     }
 
@@ -125,8 +129,8 @@ int fd_rdir_probe(pid_t pid) {
         off_cdir = off_ofiles + FD_OFILES_TO_CDIR;
         off_rdir = off_ofiles + FD_OFILES_TO_RDIR;
     } else {
-        off_cdir = 0x50;
-        off_rdir = 0x58;
+        off_cdir = 0x48;
+        off_rdir = 0x50;
     }
 
     uint64_t cdir    = krw_read64(filedesc + off_cdir);
@@ -164,9 +168,10 @@ int fd_rdir_set_for_proc(uint64_t proc, uint64_t clean_vnode) {
         return -1;
     }
 
-    uint64_t filedesc = krw_read64(proc + koffsetof(proc, fd));
+    /* iOS 17: proc->p_fd is an inline struct filedesc, not a pointer */
+    uint64_t filedesc = proc + koffsetof(proc, fd);
     if (!filedesc) {
-        fprintf(stderr, "fd_rdir: failed to read filedesc from proc\n");
+        fprintf(stderr, "fd_rdir: failed to locate filedesc in proc\n");
         return -1;
     }
 
