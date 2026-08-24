@@ -21,6 +21,7 @@ static void print_usage(void) {
 	printf("  vnode <path>       Resolve a path to its vnode and print flags\n");
 	printf("  chroot-prep        Build clean fake root (bindfs bind, skips jb)\n");
 	printf("  chroot <pid>       Apply fd_rdir chroot + platformize to target PID\n");
+	printf("  unchroot <pid>     Clear FD_CHROOT, restore rdir=NULL on target PID\n");
 	printf("  chroot-cleanup     Unmount the fake root\n");
 	printf("  app <pid>          Platformize + clean csflags for a specific PID\n");
 	printf("  platformize        Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
@@ -270,6 +271,33 @@ static int cmd_chroot_cleanup(void) {
     return 0;
 }
 
+static int cmd_unchroot(int argc, char *argv[]) {
+    if (argc < 3) {
+        printf("[-] usage: jbevasion unchroot <pid>\n");
+        return 1;
+    }
+    pid_t target = (pid_t)atoi(argv[2]);
+    if (target <= 0) {
+        printf("[-] invalid pid: %s\n", argv[2]);
+        return 1;
+    }
+    int ret = krw_init();
+    if (ret != 0) {
+        printf("[-] krw_init failed (%d)\n", ret);
+        return 1;
+    }
+    printf("========================================\n");
+    printf("  Clearing fd_rdir chroot on pid %d\n", target);
+    printf("========================================\n");
+    ret = fd_rdir_unchroot(target);
+    if (ret != 0) {
+        printf("[-] fd_rdir_unchroot failed\n");
+        return 1;
+    }
+    printf("[+] fd_rdir chroot cleared on pid %d\n", target);
+    return 0;
+}
+
 static int cmd_probe_filedesc(int argc, char *argv[]) {
     if (argc < 3) {
         printf("[-] usage: jbevasion probe <pid>\n");
@@ -323,6 +351,8 @@ int main(int argc, char *argv[]) {
 		return cmd_chroot_prep();
 	} else if (strcmp(cmd, "chroot") == 0) {
 		return cmd_chroot(argc, argv);
+	} else if (strcmp(cmd, "unchroot") == 0) {
+		return cmd_unchroot(argc, argv);
 	} else if (strcmp(cmd, "chroot-cleanup") == 0) {
 		return cmd_chroot_cleanup();
 	} else if (strcmp(cmd, "hide") == 0) {

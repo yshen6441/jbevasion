@@ -227,6 +227,31 @@ int fd_rdir_set_for_proc(uint64_t proc, uint64_t clean_vnode) {
     return 0;
 }
 
+/* Undo fd_rdir_set_for_proc: clear FD_CHROOT and drop fd_rdir back to NULL,
+   which is the normal (non-chrooted) state. The vnode we had installed is
+   held by the holder mount, so writing NULL does not release it prematurely. */
+int fd_rdir_unchroot(pid_t pid) {
+    uint64_t proc = krw_proc_for_pid(pid);
+    if (!proc) {
+        fprintf(stderr, "fd_rdir: cannot find pid %d\n", pid);
+        return -1;
+    }
+
+    uint64_t filedesc = proc + koffsetof(proc, fd);
+    uint64_t rdir    = krw_read64(filedesc + fd_rdir_offs_rdir());
+    uint8_t  flags   = krw_read8(filedesc + OFF_FD_FLAGS);
+    printf("fd_rdir: unchroot pid %d proc=0x%llx\n", pid, (unsigned long long)proc);
+    printf("fd_rdir: old  rdir=0x%llx  flags=0x%x\n",
+           (unsigned long long)rdir, flags);
+
+    krw_write64(filedesc + fd_rdir_offs_rdir(), 0);
+    uint8_t new_flags = flags & ~FD_CHROOT;
+    krw_write8(filedesc + OFF_FD_FLAGS, new_flags);
+
+    printf("fd_rdir: cleared FD_CHROOT, rdir set back to 0 (pid %d)\n", pid);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Fake-root preparation (bindfs bind mounts)                        */
 /* ------------------------------------------------------------------ */
@@ -304,6 +329,51 @@ static int ensure_holder_mount(void) {
     printf("fd_rdir: mounting %s -> %s (durable root vnode holder)\n",
            JBEVASION_ROOT, JBEVASION_HOLDER);
     return bind_mount_dir(JBEVASION_ROOT, JBEVASION_HOLDER);
+}
+
+/* bindfs forces MNT_RDONLY (bind_vfsops.c bindfs_mount), so the whole fake
+   root is read-only. A chrooted app then cannot write its sandbox container
+   or runtime temp files, crashes in a loop, and FrontBoard/runningboardd
+   restarting it storms task lifecycle code (observed task use-after-free
+   panic: zone_require failed, expected proc_task). Overlay tmpfs (writable,
+   RAM-backed) on the paths apps write to so a chrooted app behaves normally. */
+static int mount_tmpfs_unsandboxed(const char *dst) {
+    if (mkdir(dst, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "fd_rdir: mkdir(%s) failed: %s\n", dst, strerror(errno));
+        return -1;
+    }
+    uint64_t saved = 0;
+    jbclient_root_steal_ucred(0, &saved);
+    int ret = mount("tmpfs", dst, 0, NULL);
+    if (saved) jbclient_root_steal_ucred(saved, NULL);
+    if (ret != 0) {
+        fprintf(stderr, "fd_rdir: tmpfs mount(%s) failed: %s\n", dst, strerror(errno));
+        return -1;
+    }
+    if (record_mount(dst) != 0) {
+        unmount(dst, MNT_FORCE);
+        return -1;
+    }
+    printf("fd_rdir: tmpfs overlay on %s (writable)\n", dst);
+    return 0;
+}
+
+static int overlay_writable_tmpfs(void) {
+    /* App data containers + runtime scratch, in the fake root. */
+    const char *paths[] = {
+        JBEVASION_ROOT "/private/var/mobile/Containers/Data",
+        JBEVASION_ROOT "/private/var/tmp",
+    };
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        if (is_mountpoint(paths[i])) {
+            printf("fd_rdir: %s already overlaid\n", paths[i]);
+            continue;
+        }
+        if (mount_tmpfs_unsandboxed(paths[i]) != 0) {
+            fprintf(stderr, "fd_rdir: skipping writable overlay for %s\n", paths[i]);
+        }
+    }
+    return 0;
 }
 
 /* Recreate a real symlink in the fake root. Keeps relative paths intact so
@@ -454,7 +524,9 @@ int fd_rdir_prepare(void) {
         snprintf(testpath, sizeof(testpath), "%s/private", JBEVASION_ROOT);
         if (stat(testpath, &st) == 0 && S_ISDIR(st.st_mode)) {
             printf("fd_rdir: clean root already prepared at %s\n", JBEVASION_ROOT);
-            return ensure_holder_mount();
+            int r = ensure_holder_mount();
+            if (r != 0) return r;
+            return overlay_writable_tmpfs();
         }
     }
 
@@ -482,7 +554,11 @@ int fd_rdir_prepare(void) {
 
     /* Keep a durable kernel reference on the fake-root vnode so it can't be
        reclaimed after we close our fd. */
-    return ensure_holder_mount();
+    int r = ensure_holder_mount();
+    if (r != 0) return r;
+
+    /* bindfs makes everything read-only; give apps writable containers. */
+    return overlay_writable_tmpfs();
 }
 
 /* ------------------------------------------------------------------ */

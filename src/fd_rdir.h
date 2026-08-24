@@ -19,6 +19,9 @@ int fd_rdir_prepare(void);
 /* Apply fd_rdir chroot to a target PID */
 int fd_rdir_apply(pid_t pid);
 
+/* Undo the fd_rdir chroot on a target PID (clear FD_CHROOT, rdir=NULL) */
+int fd_rdir_unchroot(pid_t pid);
+
 /* Unmount the fake root */
 int fd_rdir_cleanup(void);
 
