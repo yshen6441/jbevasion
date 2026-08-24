@@ -32,7 +32,6 @@ static const char *known_ids[] = {
     "org.coolstar.Sileo",
     "com.saurik.Cydia",
     "com.tigisoftware.Filza",
-    "ws.hbang.Terminal",
     "com.wizages.aino",
     "org.sparkles.zebra",
     "com.jmillerpc.RocketBootstrap",
@@ -40,6 +39,36 @@ static const char *known_ids[] = {
     "com.opa334.Sileo",
     NULL,
 };
+
+/* Bundle IDs that must never be hidden automatically — losing the terminal
+ * leaves the user with no way to run apphide-showall to recover. */
+static const char *protect_ids[] = {
+    "ws.hbang.Terminal",
+    NULL,
+};
+
+/* Check if app_path matches any protected bundle ID. */
+static bool is_protected_app(const char *app_path) {
+    char info_path[PATH_MAX];
+    snprintf(info_path, sizeof(info_path), "%s/Info.plist", app_path);
+    if (!file_exists(info_path)) return false;
+    /* Read CFBundleIdentifier from Info.plist via plutil. */
+    char cmd[PATH_MAX + 80];
+    snprintf(cmd, sizeof(cmd),
+             "/usr/bin/plutil -extract CFBundleIdentifier raw %s 2>/dev/null",
+             info_path);
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return false;
+    char buf[256];
+    if (!fgets(buf, sizeof(buf), fp)) { pclose(fp); return false; }
+    pclose(fp);
+    size_t l = strlen(buf);
+    while (l > 0 && (buf[l-1] == '\n' || buf[l-1] == '\r')) buf[--l] = '\0';
+    for (int i = 0; protect_ids[i]; i++) {
+        if (strcmp(buf, protect_ids[i]) == 0) return true;
+    }
+    return false;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
@@ -362,6 +391,10 @@ int apphide_hide_all(void) {
         char dpath[PATH_MAX];
         snprintf(dpath, sizeof(dpath), "%s/%s", JB_APPS_DIR, ent->d_name);
         if (!is_dir(dpath)) continue;
+        if (is_protected_app(dpath)) {
+            printf("apphide: skipping protected app %s\n", ent->d_name);
+            continue;
+        }
         if (hide_app_path(dpath) == 0) count++;
     }
     closedir(d);
@@ -396,8 +429,8 @@ int apphide_hide_known(void) {
     printf("apphide: hidden %d known package manager / tool app(s)\n", count);
     /* Also do the directory-name fallback for the usual suspects, in case the
      * bundle-id read failed but the .app dirs exist. */
-    const char *known_names[] = { "Sileo", "Cydia", "Filza", "Zebra", "Saily",
-                                  "Terminal", NULL };
+const char *known_names[] = { "Sileo", "Cydia", "Filza", "Zebra", "Saily",
+                                   NULL };
     for (int i = 0; known_names[i]; i++) {
         char want[160];
         snprintf(want, sizeof(want), "%s.app", known_names[i]);

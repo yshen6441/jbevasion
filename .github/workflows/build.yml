@@ -31,12 +31,23 @@ jobs:
           gmake clean
           gmake package FINALPACKAGE=1
 
+      - name: Build RecoveryApp IPA
+        run: |
+          SDK="$THEOS/sdks/iPhoneOS17.0.2.sdk" bash RecoveryApp/build_ipa.sh
+
       - name: Show artifacts
         run: |
           ls -la packages/ 2>/dev/null || true
+          ls -la RecoveryApp/build/ 2>/dev/null || true
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
           name: jbevasion-deb
           path: packages/*.deb
+
+      - name: Upload RecoveryApp IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppHideRecovery-ipa
+          path: RecoveryApp/build/AppHideRecovery.ipa
