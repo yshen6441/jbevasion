@@ -9,6 +9,12 @@
 #include "krw.h"
 #include "hide.h"
 #include "fd_rdir.h"
+#include "apphide.h"
+
+#include <spawn.h>
+#include <sys/wait.h>
+
+extern char **environ;
 
 
 
@@ -28,6 +34,12 @@ static void print_usage(void) {
 	printf("  platformize        Set CS_PLATFORM_BINARY + TF_PLATFORM on self\n");
 	printf("  hide               (deprecated) Per-process cleanup only\n");
 	printf("  restore            (deprecated) No-op\n");
+	printf("  apphide list       List jailbroken apps in /var/jb/Applications\n");
+	printf("  apphide <bundleid> Hide one app (moves .app into stash)\n");
+	printf("  apphide-show <id>  Restore one hidden app back to /var/jb/Applications\n");
+	printf("  apphide-all        Hide every app in /var/jb/Applications\n");
+	printf("  apphide-showall    Restore everything from the stash\n");
+	printf("  apphide-known      Hide well-known package managers (Sileo/Cydia/Filza...)\n");
 	printf("  help               Show this message\n");
 }
 
@@ -349,6 +361,45 @@ static int cmd_platformize(void) {
 	return proc_hide_self();
 }
 
+/* Safe userspace respring: restart SpringBoard so the icon model rescans.
+ * This is NOT a kernel operation, does not touch vnodes/mounts, and cannot
+ * panic — worst case is the UI goes black for a second and comes back. */
+static int cmd_respring(void) {
+	uid_t uid = getuid();
+	if (uid != 0) {
+		fprintf(stderr, "respring: requires root\n");
+		return 1;
+	}
+	printf("respring: killing SpringBoard to rescan icon model...\n");
+
+	pid_t pid = 0;
+	char *const args[] = {
+		"/usr/bin/killall", "-SEGV", "SpringBoard", NULL,
+	};
+	const char *jb_killall = "/var/jb/usr/bin/killall";
+	if (access(jb_killall, X_OK) == 0) {
+		/* rootless: real killall lives under /var/jb */
+		args[0] = (char *)jb_killall;
+	}
+
+	/* killall natively uses SIGKILL-style semantics for respring on iOS:
+	 * SIGSEGV is what sbreload/ldrestart use to have SpringBoard restart
+	 * without a full device reboot. */
+	posix_spawnattr_t attr;
+	posix_spawnattr_init(&attr);
+	int r = posix_spawn(&pid, args[0], NULL, &attr, args, environ);
+	posix_spawnattr_destroy(&attr);
+	if (r != 0) {
+		fprintf(stderr, "respring: posix_spawn failed: %s\n", strerror(errno));
+		return 1;
+	}
+	int status = 0;
+	waitpid(pid, &status, 0);
+	printf("respring: SpringBoard restarted (exit=%d)\n", status);
+	printf("respring: icons should reflect hidden/restored apps now.\n");
+	return 0;
+}
+
 int main(int argc, char *argv[]) {
 	if (argc < 2) {
 		print_usage();
@@ -380,6 +431,27 @@ int main(int argc, char *argv[]) {
 		return cmd_app(argc, argv);
 	} else if (strcmp(cmd, "platformize") == 0) {
 		return cmd_platformize();
+	} else if (strcmp(cmd, "apphide") == 0) {
+		if (argc >= 3 && strcmp(argv[2], "list") == 0) {
+			return apphide_list();
+		} else if (argc >= 3 && strcmp(argv[2], "all") == 0) {
+			return apphide_hide_all();
+		} else if (argc >= 3 && strcmp(argv[2], "known") == 0) {
+			return apphide_hide_known();
+		} else if (argc >= 3) {
+			return apphide_hide(argv[2]);
+		}
+		print_usage();
+		return 1;
+	} else if (strcmp(cmd, "apphide-show") == 0) {
+		if (argc >= 3) {
+			return apphide_unhide(argv[2]);
+		}
+		return apphide_unhide_all();
+	} else if (strcmp(cmd, "apphide-showall") == 0) {
+		return apphide_unhide_all();
+	} else if (strcmp(cmd, "respring") == 0) {
+		return cmd_respring();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {
 		print_usage();
 		return 0;

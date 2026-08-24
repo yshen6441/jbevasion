@@ -14,9 +14,9 @@ include $(THEOS)/makefiles/common.mk
 
 TOOL_NAME = jbevasion
 
-jbevasion_FILES = src/main.m src/krw.c src/hide.c src/fd_rdir.c
+jbevasion_FILES = src/main.m src/krw.c src/hide.c src/fd_rdir.c src/apphide.c
 jbevasion_CFLAGS = -Iinclude -fobjc-arc
-jbevasion_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib
+jbevasion_LDFLAGS = -Lstub -ljailbreak -framework CoreFoundation -Wl,-rpath,/var/jb/usr/lib
 jbevasion_CODESIGN_FLAGS = -Sent.plist
 jbevasion_INSTALL_PATH = /usr/bin
 
