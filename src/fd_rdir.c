@@ -274,6 +274,38 @@ static int bind_mount_dir(const char *src, const char *dst) {
     return 0;
 }
 
+/* True if path is a mountpoint: its st_dev differs from its parent. */
+static bool is_mountpoint(const char *path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    uint32_t dev = st.st_dev;
+
+    char parent[PATH_MAX];
+    strlcpy(parent, path, sizeof(parent));
+    char *slash = strrchr(parent, '/');
+    if (slash && slash != parent) *slash = '\0';
+    if (stat(parent, &st) != 0) return false;
+    return dev != st.st_dev;
+}
+
+/* Mount JBEVASION_ROOT itself via bindfs onto JBEVASION_HOLDER. The kernel
+   mount structure holds a persistent vnode_ref on the fake-root vnode
+   (bind_vfsops.c bindfs_mount 173-179), so the vnode we later store in a
+   target proc's fd_rdir stays alive even after our process exits and the
+   open fd is closed. Previously the fake-root vnode had no durable kernel
+   reference; once our fd was closed it could be reclaimed, and any later
+   path resolution from a chrooted proc dereferenced the freed vnode
+   (kernel data abort at vnode+0x64 = v_iocount). */
+static int ensure_holder_mount(void) {
+    if (is_mountpoint(JBEVASION_HOLDER)) {
+        printf("fd_rdir: holder already mounted at %s\n", JBEVASION_HOLDER);
+        return 0;
+    }
+    printf("fd_rdir: mounting %s -> %s (durable root vnode holder)\n",
+           JBEVASION_ROOT, JBEVASION_HOLDER);
+    return bind_mount_dir(JBEVASION_ROOT, JBEVASION_HOLDER);
+}
+
 /* Recreate a real symlink in the fake root. Keeps relative paths intact so
    children resolve within the fake tree. */
 static int clone_symlink(const char *src, const char *dst) {
@@ -422,7 +454,7 @@ int fd_rdir_prepare(void) {
         snprintf(testpath, sizeof(testpath), "%s/private", JBEVASION_ROOT);
         if (stat(testpath, &st) == 0 && S_ISDIR(st.st_mode)) {
             printf("fd_rdir: clean root already prepared at %s\n", JBEVASION_ROOT);
-            return 0;
+            return ensure_holder_mount();
         }
     }
 
@@ -448,7 +480,9 @@ int fd_rdir_prepare(void) {
        /private/var/mobile tree, so app-scoped storage survives the chroot.
        /tmp, /etc resolve through cloned symlinks into /private. */
 
-    return 0;
+    /* Keep a durable kernel reference on the fake-root vnode so it can't be
+       reclaimed after we close our fd. */
+    return ensure_holder_mount();
 }
 
 /* ------------------------------------------------------------------ */
@@ -457,11 +491,19 @@ int fd_rdir_prepare(void) {
 int fd_rdir_apply(pid_t pid) {
     printf("fd_rdir: applying chroot to pid %d\n", pid);
 
-    /* Step 1: Get the clean root vnode */
-    uint64_t clean_vnode = fd_rdir_get_vnode_for_path(JBEVASION_ROOT);
+    if (!is_mountpoint(JBEVASION_HOLDER)) {
+        fprintf(stderr, "fd_rdir: %s is not mounted - run 'jbevasion chroot-prep' first "
+                "(the holder mount keeps the root vnode alive)\n", JBEVASION_HOLDER);
+        return -1;
+    }
+
+    /* Step 1: Get the clean root vnode. We open the holder mountpoint so the
+       returned vnode is the bindfs root, which the mount keeps referenced for
+       as long as it is mounted. */
+    uint64_t clean_vnode = fd_rdir_get_vnode_for_path(JBEVASION_HOLDER);
     if (!clean_vnode) {
         fprintf(stderr, "fd_rdir: failed to get vnode for %s (run 'jbevasion chroot-prep' first?)\n",
-                JBEVASION_ROOT);
+                JBEVASION_HOLDER);
         return -1;
     }
 
@@ -479,7 +521,7 @@ int fd_rdir_apply(pid_t pid) {
     /* Step 3: Apply per-process cleanup (platformize, csflags, etc.) */
     proc_hide_pid(pid);
 
-    /* Step 4: Write fd_rdir/fd_cdir + FD_CHROOT */
+    /* Step 4: Write fd_rdir + FD_CHROOT (root vnode held via holder mount) */
     int ret = fd_rdir_set_for_proc(proc, clean_vnode);
     if (ret != 0) {
         fprintf(stderr, "fd_rdir: fd_rdir_set_for_proc failed\n");
