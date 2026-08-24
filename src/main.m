@@ -40,6 +40,8 @@ static void print_usage(void) {
 	printf("  apphide-all        Hide every app in /var/jb/Applications\n");
 	printf("  apphide-show <id>  Restore one hidden app back to /var/jb/Applications\n");
 	printf("  apphide-showall    Restore everything from the stash\n");
+	printf("  apphide-resync     Clear LS csstore cache + restart lsd + respring\n");
+	printf("                     (icon refresh without full device reboot)\n");
 	printf("  help               Show this message\n");
 }
 
@@ -458,6 +460,8 @@ int main(int argc, char *argv[]) {
 		return apphide_unhide_all();
 	} else if (strcmp(cmd, "apphide-showall") == 0) {
 		return apphide_unhide_all();
+	} else if (strcmp(cmd, "apphide-resync") == 0) {
+		return apphide_resync_icons();
 	} else if (strcmp(cmd, "respring") == 0) {
 		return cmd_respring();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {

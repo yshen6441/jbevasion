@@ -25,4 +25,9 @@ int apphide_hide_all(void);
 int apphide_hide_known(void);
 int apphide_unhide_all(void);
 
+/* Make SpringBoard icons reflect the stash changes without a full reboot:
+ * back up LaunchServices cstore caches, SIGKILL lsd (it re-registers apps on
+ * restart, rescanning /var/jb/Applications), then respring SpringBoard. */
+int apphide_resync_icons(void);
+
 #endif
