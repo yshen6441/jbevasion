@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <sys/param.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/sysctl.h>
@@ -13,8 +15,6 @@
 
 #include <spawn.h>
 #include <sys/wait.h>
-#include <objc/runtime.h>
-#include <objc/message.h>
 
 extern char **environ;
 
@@ -365,34 +365,48 @@ static int cmd_platformize(void) {
 	return proc_hide_self();
 }
 
-/* TrollStore‑style LS refresh: call LSApplicationWorkspace _LSRefresh
- * (private API) then killall -9 SpringBoard. No lsd/csstore access. */
-static void ls_refresh_callback_impl(void) {
-	printf("apphide: calling LSApplicationWorkspace _LSRefresh...\n");
-	Class lsClass = objc_getClass("LSApplicationWorkspace");
-	if (lsClass) {
-		id workspace = ((id (*)(id, SEL))objc_msgSend)
-			((id)lsClass, sel_registerName("defaultWorkspace"));
-		if (workspace) {
-			SEL refreshSel = sel_registerName("_LSRefresh");
-			if (class_respondsToSelector(lsClass, refreshSel)) {
-				((void (*)(id, SEL))objc_msgSend)
-					(workspace, refreshSel);
-				printf("apphide: _LSRefresh done, respringing…\n");
-			} else {
-				fprintf(stderr, "apphide: _LSRefresh not found, "
-					"falling back to killall lsd\n");
-				/* Fallback: kill lsd so launchd restarts it cleanly. */
-				pid_t lsdpid = 0;
-				char *ka[] = { (char*)"/usr/bin/killall", "-9", "lsd", NULL };
-				const char *jbk = "/var/jb/usr/bin/killall";
-				if (access(jbk, X_OK) == 0) ka[0] = (char *)jbk;
-				posix_spawn(&lsdpid, ka[0], NULL, NULL, ka, environ);
-			}
+/* TrollStore‑style LS refresh: kill lsd, delete csstore, kill SpringBoard.
+ * csstore is a rebuildable cache — deleting it forces lsd to re-scan
+ * /var/jb/Applications/ on restart, which drops entries for moved .app files. */
+static void kill_lsd_and_csstore(void) {
+	pid_t pid = 0;
+	char *ka[4];
+	ka[0] = "/usr/bin/killall";
+	ka[1] = "-9";
+	ka[2] = "lsd";
+	ka[3] = NULL;
+	const char *jbk = "/var/jb/usr/bin/killall";
+	if (access(jbk, X_OK) == 0) ka[0] = (char *)jbk;
+	posix_spawn(&pid, ka[0], NULL, NULL, ka, environ);
+	/* Don't wait — lsd dies instantly */
+}
+
+static void remove_csstore_files(void) {
+	const char *csdir = "/var/mobile/Library/Caches";
+	DIR *d = opendir(csdir);
+	if (!d) return;
+	struct dirent *de;
+	while ((de = readdir(d)) != NULL) {
+		if (strncmp(de->d_name, "com.apple.LaunchServices-", 25) == 0) {
+			char path[PATH_MAX];
+			snprintf(path, sizeof(path), "%s/%s", csdir, de->d_name);
+			unlink(path);
+			printf("apphide: removed %s\n", path);
 		}
 	}
+	closedir(d);
+}
+
+static void ls_refresh_callback_impl(void) {
+	printf("apphide: killing lsd to force LS restart…\n");
+	kill_lsd_and_csstore();
+	usleep(500000); /* 500ms — let lsd die before we nuke its cache */
+
+	printf("apphide: deleting LaunchServices csstore cache…\n");
+	remove_csstore_files();
 
 	/* respring SpringBoard (‑9, same as TrollStore) */
+	printf("apphide: respringing SpringBoard…\n");
 	pid_t sbpid = 0;
 	char *args[4];
 	args[0] = "/usr/bin/killall";
@@ -402,9 +416,7 @@ static void ls_refresh_callback_impl(void) {
 	const char *jb_killall = "/var/jb/usr/bin/killall";
 	if (access(jb_killall, X_OK) == 0)
 		args[0] = (char *)jb_killall;
-	/* spawn & don't wait – SpringBoard dies immediately */
 	posix_spawn(&sbpid, args[0], NULL, NULL, args, environ);
-	/* the process exits normally after this; SpringBoard respawns by launchd */
 	printf("apphide: SpringBoard restarted, icons updated.\n");
 }
 
