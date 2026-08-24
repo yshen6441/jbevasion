@@ -425,6 +425,23 @@ int fd_rdir_diag_mount(void) {
 
     diag_run("tmpfs NULL, over holder mount", "tmpfs", JBEVASION_HOLDER, 0, NULL);
 
+    printf("fd_rdir: --- tmpfs mount-data format scan (real dir, data as string) ---\n");
+    const char *cands[] = {
+        "", "262144", "size 262144", "size=262144",
+        "size=262144k", "size=256M", "size=268435456", "maxfiles=16",
+        "files=16,size=262144", "noatime", "mode=0755",
+        "size=262144,noatime",
+    };
+    for (size_t i = 0; i < sizeof(cands) / sizeof(cands[0]); i++) {
+        diag_run(cands[i], "tmpfs", "/tmp/jbdiag_scan", 0, cands[i]);
+    }
+    diag_run("flags,NB|NOSUID data=NULL", "tmpfs", "/tmp/jbdiag_scan",
+             MNT_DONTBROWSE | MNT_NOSUID, NULL);
+    diag_run("flags,NB|NOSUID size=262144", "tmpfs", "/tmp/jbdiag_scan",
+             MNT_DONTBROWSE | MNT_NOSUID, "size=262144");
+    diag_run("flags,NB|NOSUID empty str", "tmpfs", "/tmp/jbdiag_scan",
+             MNT_DONTBROWSE | MNT_NOSUID, "");
+
     printf("fd_rdir: diag-mount done\n");
     return 0;
 }
