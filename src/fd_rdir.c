@@ -426,6 +426,7 @@ int fd_rdir_diag_mount(void) {
     diag_run("tmpfs NULL, over holder mount", "tmpfs", JBEVASION_HOLDER, 0, NULL);
 
     printf("fd_rdir: --- tmpfs mount-data format scan (real dir, data as string) ---\n");
+    mkdir("/tmp/jbdiag_scan", 0755);
     const char *cands[] = {
         "", "262144", "size 262144", "size=262144",
         "size=262144k", "size=256M", "size=268435456", "maxfiles=16",
