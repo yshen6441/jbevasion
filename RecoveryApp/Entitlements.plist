@@ -4,6 +4,10 @@
 <dict>
 	<key>platform-application</key>
 	<true/>
+	<key>platform-application-with-persona-mgmt</key>
+	<true/>
+	<key>com.apple.private.persona-mgmt</key>
+	<true/>
 	<key>com.apple.private.security.no-container</key>
 	<true/>
 	<key>com.apple.private.security.container-required</key>
