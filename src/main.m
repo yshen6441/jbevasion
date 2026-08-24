@@ -36,10 +36,10 @@ static void print_usage(void) {
 	printf("  restore            (deprecated) No-op\n");
 	printf("  apphide list       List jailbroken apps in /var/jb/Applications\n");
 	printf("  apphide <bundleid> Hide one app (moves .app into stash)\n");
-	printf("  apphide-show <id>  Restore one hidden app back to /var/jb/Applications\n");
-	printf("  apphide-all        Hide every app in /var/jb/Applications\n");
-	printf("  apphide-showall    Restore everything from the stash\n");
 	printf("  apphide-known      Hide well-known package managers (Sileo/Cydia/Filza...)\n");
+	printf("  apphide-all        Hide every app in /var/jb/Applications\n");
+	printf("  apphide-show <id>  Restore one hidden app back to /var/jb/Applications\n");
+	printf("  apphide-showall    Restore everything from the stash\n");
 	printf("  help               Show this message\n");
 }
 
@@ -445,6 +445,12 @@ int main(int argc, char *argv[]) {
 		}
 		print_usage();
 		return 1;
+	} else if (strcmp(cmd, "apphide-known") == 0) {
+		return apphide_hide_known();
+	} else if (strcmp(cmd, "apphide-all") == 0) {
+		return apphide_hide_all();
+	} else if (strcmp(cmd, "apphide-list") == 0) {
+		return apphide_list();
 	} else if (strcmp(cmd, "apphide-show") == 0) {
 		if (argc >= 3) {
 			return apphide_unhide(argv[2]);
