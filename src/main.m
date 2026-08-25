@@ -62,9 +62,10 @@ static void print_usage(void) {
 	printf("  apphide-showall    Restore all hidden apps\n");
 	printf("  apphide-status     Show hidden/visible app status\n");
 	printf("  vhide <path>       Hide one path via vnode VBAD (safe targets only)\n");
-	printf("  vhide-all          Hide all known safe targets (bash/sshd/apt/frida...)\n");
+	printf("  vhide-all          Hide all target paths (built-in + config plist)\n");
 	printf("  vhide-showall      Restore all hidden vnodes\n");
 	printf("  vhide-status       Show protected rules + per-target VBAD state\n");
+	printf("  vhide-reload       Reload /var/jb/Library/Preferences/com.jbevasion.vhide.plist\n");
 	printf("  help               Show this message\n");
 }
 
@@ -392,16 +393,19 @@ static int cmd_vhide(int argc, char *argv[]) {
 		printf("[-] krw_init failed (%d)\n", ret);
 		return 1;
 	}
+	vhide_config_load();
 	if (argc >= 3 && strcmp(argv[2], "all") == 0) {
 		return vhide_known();
 	} else if (argc >= 3 && strcmp(argv[2], "showall") == 0) {
 		return vhide_restore_all();
 	} else if (argc >= 3 && strcmp(argv[2], "status") == 0) {
 		return vhide_status();
+	} else if (argc >= 3 && strcmp(argv[2], "reload") == 0) {
+		return vhide_config_load();
 	} else if (argc >= 3) {
 		return vhide_path(argv[2]);
 	}
-	printf("usage: vhide <path|all|showall|status>\n");
+	printf("usage: vhide <path|all|showall|status|reload>\n");
 	return 1;
 }
 
@@ -521,12 +525,16 @@ int main(int argc, char *argv[]) {
 		return cmd_vhide(argc, argv);
 	} else if (strcmp(cmd, "vhide-all") == 0) {
 		if (krw_init() != 0) return 1;
+		vhide_config_load();
 		return vhide_known();
 	} else if (strcmp(cmd, "vhide-showall") == 0) {
 		if (krw_init() != 0) return 1;
 		return vhide_restore_all();
 	} else if (strcmp(cmd, "vhide-status") == 0) {
+		vhide_config_load();
 		return vhide_status();
+	} else if (strcmp(cmd, "vhide-reload") == 0) {
+		return vhide_config_load();
 	} else if (strcmp(cmd, "respring") == 0) {
 		return cmd_respring();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {

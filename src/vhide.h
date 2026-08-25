@@ -20,6 +20,7 @@ int vhide_known(void);
 int vhide_path(const char *path);
 int vhide_restore_all(void);
 int vhide_status(void);
+int vhide_config_load(void);
 
 #ifdef __cplusplus
 }

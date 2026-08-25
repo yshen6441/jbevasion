@@ -48,6 +48,43 @@ jbevasion apphide-known       # 隐藏知名包管理器
 
 隐藏操作可逆：恢复时先把 `.app` 目录移回原处并还原 vnode，再运行 `uicache`。
 
+### vhide：vnode 级痕迹隐藏
+
+`vhide` 用 vnode VBAD 隐藏与插件运行无关的越狱痕迹（bash/sshd/frida/apt 残留等），
+同时用**白名单保护**保证越狱环境不瘫痪——任何命中 `libjailbreak`、`TweakInject`、
+`ellekit`/`substrate`、`jailbreakd`、`jbevasion` 自身的路径一律拒绝隐藏。
+
+```sh
+jbevasion vhide-all         # 隐藏所有目标（内置 + 配置文件）
+jbevasion vhide <path>      # 隐藏单个路径（过白名单校验）
+jbevasion vhide-showall     # 恢复所有隐藏 vnode
+jbevasion vhide-status      # 查看保护规则 + 每个目标的 VBAD 状态
+jbevasion vhide-reload      # 重载配置文件
+```
+
+#### 配置文件
+
+路径：`/var/jb/Library/Preferences/com.jbevasion.vhide.plist`
+
+```xml
+<dict>
+    <key>Targets</key>
+    <array>
+        <string>/var/jb/usr/bin/MyTool</string>
+        <string>/var/jb/Applications/SomeApp.app</string>
+    </array>
+    <key>ProtectedTokens</key>
+    <array>
+        <string>/var/jb/usr/bin/sileo</string>
+    </array>
+</dict>
+```
+
+- `Targets`：额外要隐藏的路径，`vhide-all` 时一并处理（需存在且未被保护规则拦截）
+- `ProtectedTokens`：你的白名单。目标路径只要包含其中任一子串就永不隐藏。
+  内置的运行时必需规则（`libjailbreak`/`TweakInject`/`ellekit`/`substrate`/`jailbreakd`/`jbevasion`）
+  始终生效，不会因配置文件而解除
+
 ## KRW API 接口
 
 `src/krw.h` / `src/krw.c` 中的薄封装层提供一个独立于底层原语的稳定接口。
