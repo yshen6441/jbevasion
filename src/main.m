@@ -363,42 +363,58 @@ static int cmd_platformize(void) {
 	return proc_hide_self();
 }
 
-/* TrollStore‑style LS refresh: kill lsd, delete csstore, kill SpringBoard.
- * csstore is a rebuildable cache — deleting it forces lsd to re-scan
- * /var/jb/Applications/ on restart, which drops entries for moved .app files. */
-static void kill_lsd_and_csstore(void) {
-	pid_t pid = 0;
-	char *ka[4];
-	ka[0] = "/usr/bin/killall";
-	ka[1] = "-9";
-	ka[2] = "lsd";
-	ka[3] = NULL;
-	const char *jbk = "/var/jb/usr/bin/killall";
-	if (access(jbk, X_OK) == 0) ka[0] = (char *)jbk;
-	posix_spawn(&pid, ka[0], NULL, NULL, ka, environ);
-	/* Don't wait — lsd dies instantly */
+/* Run uicache as the mobile user so LaunchServices rebuilds its
+ * per-user registration database from a fresh directory scan of
+ * /var/jb/Applications/. Bundles we stashed are gone from disk, so they
+ * drop out of the icon model. */
+static int run_uicache(char *const args[], char *errbuf, size_t errsz) {
+	pid_t child = fork();
+	if (child < 0) {
+		fprintf(stderr, "apphide: fork failed: %s\n", strerror(errno));
+		return -1;
+	}
+	if (child == 0) {
+		setgid(501);
+		setuid(501);
+		execv(args[0], args);
+		_exit(127);
+	}
+	int status = 0;
+	waitpid(child, &status, 0);
+	if (errbuf && errsz) errbuf[0] = '\0';
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+		fprintf(stderr, "apphide: uicache exited with status %d\n", rc);
+		return rc;
+	}
+	return 0;
 }
 
-static void remove_csstore_files(void) {
-	pid_t pid = 0;
-	char *args[] = { (char*)"/var/jb/usr/bin/sh", "-c",
-		"rm -f /var/mobile/Library/Caches/com.apple.LaunchServices-*.csstore",
-		NULL };
-	const char *jbsh = "/var/jb/bin/sh";
-	if (access(jbsh, X_OK) == 0) args[0] = (char *)jbsh;
-	posix_spawn(&pid, args[0], NULL, NULL, args, environ);
-	waitpid(pid, NULL, 0);
+static const char *find_uicache(void) {
+	static const char *candidates[] = {
+		"/var/jb/usr/bin/uicache",
+		"/var/jb/usr/bin/uicache-strapped",
+		"/usr/bin/uicache",
+		NULL,
+	};
+	for (int i = 0; candidates[i]; i++) {
+		if (access(candidates[i], X_OK) == 0)
+			return candidates[i];
+	}
+	return NULL;
 }
 
 static void ls_refresh_callback_impl(void) {
-	printf("apphide: killing lsd to force LS restart…\n");
-	kill_lsd_and_csstore();
-	usleep(500000); /* 500ms — let lsd die before we nuke its cache */
+	const char *uc = find_uicache();
+	if (uc) {
+		printf("apphide: refreshing LaunchServices with %s -a (as mobile)...\n", uc);
+		char *args[] = { (char *)uc, "-a", NULL };
+		run_uicache(args, NULL, 0);
+	} else {
+		fprintf(stderr, "apphide: no uicache found\n");
+	}
 
-	printf("apphide: deleting LaunchServices csstore cache…\n");
-	remove_csstore_files();
-
-	/* respring SpringBoard (‑9, same as TrollStore) */
+	/* respring SpringBoard so icons update */
 	printf("apphide: respringing SpringBoard…\n");
 	pid_t sbpid = 0;
 	char *args[4];

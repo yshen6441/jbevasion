@@ -10,11 +10,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/param.h>
-#include <sys/wait.h>
-#include <spawn.h>
 #include <CoreFoundation/CoreFoundation.h>
-
-extern char **environ;
 
 /* Callback for main.m to install a better LS refresh (ObjC _LSRefresh + respring) */
 void (*apphide_ls_refresh_callback)(void) = NULL;
@@ -320,7 +316,6 @@ int apphide_hide(const char *bundle_id) {
     int rc = hide_app_path(app_path);
     free(app_path);
     if (rc == 0) refresh_ls_all();
-    printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
     return rc;
 }
 
@@ -338,10 +333,7 @@ int apphide_unhide(const char *bundle_id) {
         return 0;
     }
     int rc = unhide_by_name(bundle_id);
-    if (rc == 0) {
-        refresh_ls_all();
-        printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
-    }
+    if (rc == 0) refresh_ls_all();
     return rc;
 }
 
@@ -365,10 +357,7 @@ int apphide_unhide_all(void) {
         unhide_by_name(names[i]);
     }
     printf("apphide: restored %d hidden app(s)\n", n);
-    if (n > 0) {
-        refresh_ls_all();
-        printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
-    }
+    if (n > 0) refresh_ls_all();
     return 0;
 }
 
@@ -394,10 +383,7 @@ int apphide_hide_all(void) {
     }
     closedir(d);
     printf("apphide: hidden %d app(s)\n", count);
-    if (count > 0) {
-        refresh_ls_all();
-        printf("apphide: run 'jbevasion respring' to apply the icon change.\n");
-    }
+    if (count > 0) refresh_ls_all();
     return 0;
 }
 
@@ -450,70 +436,16 @@ const char *known_names[] = { "Sileo", "Cydia", "Filza", "Zebra", "Saily",
 /*  LS registration refresh (icons without reboot)                    */
 /* ------------------------------------------------------------------ */
 
-/* Run uicache as the mobile user so LaunchServices rebuilds its
- * per-user registration database from a fresh directory scan of
- * /var/jb/Applications. Bundles we stashed are gone from disk, so they
- * drop out of the icon model. Running as mobile matters: the SpringBoard
- * icon database is the mobile user's LS cache, not root's. */
-static int run_uicache(char *const args[], char *errbuf, size_t errsz) {
-    pid_t child = fork();
-    if (child < 0) {
-        fprintf(stderr, "apphide: fork failed: %s\n", strerror(errno));
-        return -1;
-    }
-    if (child == 0) {
-        setgid(501);
-        setuid(501);
-        execv(args[0], args);
-        _exit(127);
-    }
-
-    int status = 0;
-    waitpid(child, &status, 0);
-
-    if (errbuf && errsz) errbuf[0] = '\0';
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-        fprintf(stderr, "apphide: uicache exited with status %d\n", rc);
-        return rc;
-    }
-    return 0;
-}
-
-static const char *find_uicache(void) {
-    static const char *candidates[] = {
-        "/var/jb/usr/bin/uicache",
-        "/var/jb/usr/bin/uicache-strapped",
-        "/usr/bin/uicache",
-        NULL,
-    };
-    for (int i = 0; candidates[i]; i++) {
-        if (access(candidates[i], X_OK) == 0)
-            return candidates[i];
-    }
-    return NULL;
-}
-
 static void refresh_ls_all(void) {
-    /* If main.m installed a better callback (LSApplicationWorkspace _LSRefresh + respring), use it. */
     if (apphide_ls_refresh_callback) {
         apphide_ls_refresh_callback();
         return;
     }
-    /* Fallback: uicache -a as mobile. */
-    const char *uc = find_uicache();
-    if (!uc) {
-        fprintf(stderr, "apphide: no uicache found; icon refresh needs a reboot\n");
-        return;
-    }
-    printf("apphide: refreshing LaunchServices with %s -a (as mobile)...\n", uc);
-    char *args[] = { (char *)uc, "-a", NULL };
-    run_uicache(args, NULL, 0);
+    fprintf(stderr, "apphide: no LS refresh callback available\n");
 }
 
 int apphide_refresh_ls(void) {
-    printf("apphide: resyncing LaunchServices registration (safe, no csstore/lsd touch)\n");
+    printf("apphide: resyncing LaunchServices registration\n");
     refresh_ls_all();
-    printf("apphide: LS refreshed - run 'jbevasion respring' to update icons.\n");
     return 0;
 }
