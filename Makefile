@@ -25,3 +25,20 @@ internal-tool-all::
 	$(MAKE) -C stub SYSROOT="$(SYSROOT)"
 
 include $(THEOS_MAKE_PATH)/tool.mk
+
+TWEAK_NAME = jbevasiontweak
+jbevasiontweak_FILES = Tweak/Tweak.x
+jbevasiontweak_CFLAGS = -Iinclude -fobjc-arc
+jbevasiontweak_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib
+jbevasiontweak_FRAMEWORKS = UIKit
+jbevasiontweak_PRIVATE_FRAMEWORKS = Preferences
+
+include $(THEOS_MAKE_PATH)/tweak.mk
+
+BUNDLE_NAME = jbevasion
+jbevasion_FILES = Preferences/JBRootListController.m
+jbevasion_CFLAGS = -fobjc-arc
+jbevasion_PRIVATE_FRAMEWORKS = Preferences
+jbevasion_INSTALL_PATH = /Library/PreferenceBundles
+
+include $(THEOS_MAKE_PATH)/bundle.mk

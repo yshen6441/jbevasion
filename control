@@ -6,5 +6,5 @@ Description: Jailbreak environment hiding controller (Dopamine)
 Author: jbevasion
 Maintainer: jbevasion
 Section: Tweaks
-Depends: mobilesubstrate
+Depends: mobilesubstrate, preferenceloader, com.opa334.altlist
 Tag: purpose::extension
