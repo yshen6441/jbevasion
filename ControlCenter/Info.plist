@@ -10,7 +10,7 @@
     <string>BNDL</string>
     <key>CFBundleExecutable</key>
     <string>jbevasioncc</string>
-    <key>CCModuleProvider</key>
+    <key>NSPrincipalClass</key>
     <string>JBEvasionCCModule</string>
     <key>CCModuleIdentifier</key>
     <string>com.jbevasion.apphide.ccmodule</string>
