@@ -66,3 +66,5 @@ char *get_jbroot(void) { return NULL; }
 /* --- jbclient_xpc.h --- */
 int jbclient_root_steal_ucred(uint64_t ucredToSteal, uint64_t *orgUcred)
 { (void)ucredToSteal; (void)orgUcred; return -1; }
+int jbclient_dopamine_get_root(void) { return -1; }
+int jbclient_dopamine_drop_root(void) { return -1; }
