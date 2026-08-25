@@ -9,18 +9,22 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#define VNODE_BUF_SIZE 0x200
 #define HIDE_SAVED_MAX 64
 
-static struct {
-	uint64_t vaddr;
-	uint8_t  data[VNODE_BUF_SIZE];
-} g_saved_vnodes[HIDE_SAVED_MAX];
-static int g_saved_count = 0;
-
+/* Only save/restore v_type + usecount/iocount, not the full vnode struct.
+ * Saving the full vnode corrupts v_name/v_parent when the file is moved
+ * after marking VBAD. */
 #define OFF_V_TYPE          0x074
 #define OFF_V_USECOUNT      0x060
 #define OFF_V_IOCOUNT       0x064
+
+static struct {
+	uint64_t vaddr;
+	uint16_t orig_v_type;
+	uint32_t orig_usecount;
+	uint32_t orig_iocount;
+} g_saved[HIDE_SAVED_MAX];
+static int g_saved_count = 0;
 
 static uint64_t get_vnode_for_path(const char *path) {
 	int fd = open(path, O_RDONLY | O_NONBLOCK);
@@ -40,40 +44,36 @@ int vnode_hide_path(const char *path) {
 		return -1;
 	}
 
-	if (g_saved_count < HIDE_SAVED_MAX) {
-		int found = 0;
-		for (int i = 0; i < g_saved_count; i++) {
-			if (g_saved_vnodes[i].vaddr == vnode) { found = 1; break; }
-		}
-		if (!found) {
-			uint8_t buf[VNODE_BUF_SIZE];
-			if (krw_read_buf(vnode, buf, sizeof(buf)) == 0) {
-				g_saved_vnodes[g_saved_count].vaddr = vnode;
-				memcpy(g_saved_vnodes[g_saved_count].data, buf, sizeof(buf));
-				g_saved_count++;
-			}
+	/* Check if already saved */
+	for (int i = 0; i < g_saved_count; i++) {
+		if (g_saved[i].vaddr == vnode) {
+			printf("hide: %s already hidden\n", path);
+			return 0;
 		}
 	}
 
-	uint8_t vbuf[VNODE_BUF_SIZE];
-	memset(vbuf, 0, sizeof(vbuf));
-	if (krw_read_buf(vnode, vbuf, sizeof(vbuf)) != 0) {
-		fprintf(stderr, "hide: failed to read vnode\n");
+	if (g_saved_count >= HIDE_SAVED_MAX) {
+		fprintf(stderr, "hide: too many hidden paths\n");
 		return -1;
 	}
 
-	uint16_t orig_type = *(uint16_t *)(vbuf + OFF_V_TYPE);
-	*(uint16_t *)(vbuf + OFF_V_TYPE) = 0;
-	*(uint32_t *)(vbuf + OFF_V_USECOUNT) = 0x2000;
-	*(uint32_t *)(vbuf + OFF_V_IOCOUNT)  = 0x2000;
+	uint16_t v_type = krw_read16(vnode + OFF_V_TYPE);
+	uint32_t usecount = krw_read32(vnode + OFF_V_USECOUNT);
+	uint32_t iocount = krw_read32(vnode + OFF_V_IOCOUNT);
 
-	if (krw_write_buf(vnode, vbuf, sizeof(vbuf)) != 0) {
-		fprintf(stderr, "hide: failed to write vnode\n");
-		return -1;
-	}
+	g_saved[g_saved_count].vaddr = vnode;
+	g_saved[g_saved_count].orig_v_type = v_type;
+	g_saved[g_saved_count].orig_usecount = usecount;
+	g_saved[g_saved_count].orig_iocount = iocount;
+	g_saved_count++;
+
+	/* Set v_type = VBAD, inflate usecount/iocount to prevent recycling */
+	krw_write16(vnode + OFF_V_TYPE, 0);
+	krw_write32(vnode + OFF_V_USECOUNT, 0x2000);
+	krw_write32(vnode + OFF_V_IOCOUNT, 0x2000);
 
 	printf("hide: %s  vnode 0x%llx  v_type 0x%x -> VBAD\n",
-	       path, (unsigned long long)vnode, orig_type);
+	       path, (unsigned long long)vnode, v_type);
 	return 0;
 }
 
@@ -82,37 +82,65 @@ int vnode_hide_all(void) {
 	return -1;
 }
 
-/* Restore a specific vnode by its original vaddr */
 int vnode_restore_path(uint64_t vaddr) {
 	for (int i = 0; i < g_saved_count; i++) {
-		if (g_saved_vnodes[i].vaddr == vaddr) {
-			if (krw_write_buf(vaddr, g_saved_vnodes[i].data, VNODE_BUF_SIZE) == 0) {
-				printf("hide: restored vnode 0x%llx\n", (unsigned long long)vaddr);
-				memmove(&g_saved_vnodes[i], &g_saved_vnodes[i+1],
-				        (g_saved_count - i - 1) * sizeof(g_saved_vnodes[0]));
-				g_saved_count--;
-				return 0;
-			}
-			fprintf(stderr, "hide: failed to restore vnode 0x%llx\n", (unsigned long long)vaddr);
-			return -1;
+		if (g_saved[i].vaddr == vaddr) {
+			krw_write16(vaddr + OFF_V_TYPE, g_saved[i].orig_v_type);
+			krw_write32(vaddr + OFF_V_USECOUNT, g_saved[i].orig_usecount);
+			krw_write32(vaddr + OFF_V_IOCOUNT, g_saved[i].orig_iocount);
+			printf("hide: restored vnode 0x%llx v_type=0x%x\n",
+			       (unsigned long long)vaddr, g_saved[i].orig_v_type);
+			memmove(&g_saved[i], &g_saved[i+1],
+			        (g_saved_count - i - 1) * sizeof(g_saved[0]));
+			g_saved_count--;
+			return 0;
 		}
 	}
-	fprintf(stderr, "hide: vnode 0x%llx not found in saved list\n", (unsigned long long)vaddr);
+	fprintf(stderr, "hide: vnode 0x%llx not found\n", (unsigned long long)vaddr);
 	return -1;
 }
 
 int vnode_restore_all(void) {
 	int restored = 0;
 	for (int i = 0; i < g_saved_count; i++) {
-		if (krw_write_buf(g_saved_vnodes[i].vaddr, g_saved_vnodes[i].data, VNODE_BUF_SIZE) == 0) {
-			printf("restore: OK  0x%llx\n", (unsigned long long)g_saved_vnodes[i].vaddr);
-			restored++;
-		} else {
-			fprintf(stderr, "restore: FAILED  0x%llx\n", (unsigned long long)g_saved_vnodes[i].vaddr);
-		}
+		krw_write16(g_saved[i].vaddr + OFF_V_TYPE, g_saved[i].orig_v_type);
+		krw_write32(g_saved[i].vaddr + OFF_V_USECOUNT, g_saved[i].orig_usecount);
+		krw_write32(g_saved[i].vaddr + OFF_V_IOCOUNT, g_saved[i].orig_iocount);
+		printf("restore: OK  0x%llx v_type=0x%x\n",
+		       (unsigned long long)g_saved[i].vaddr, g_saved[i].orig_v_type);
+		restored++;
 	}
 	g_saved_count = 0;
 	return (restored > 0) ? 0 : -1;
+}
+
+/* Export the most recently hidden vnode's data. Returns the last entry from
+ * g_saved[] without removing it. Used by apphide to persist vnode data to
+ * marker files across process restarts. */
+int vnode_export_last(uint64_t *vaddr, uint16_t *vtype, uint32_t *usecount, uint32_t *iocount) {
+	if (g_saved_count == 0) return -1;
+	int i = g_saved_count - 1;
+	*vaddr = g_saved[i].vaddr;
+	*vtype = g_saved[i].orig_v_type;
+	*usecount = g_saved[i].orig_usecount;
+	*iocount = g_saved[i].orig_iocount;
+	return 0;
+}
+
+/* Restore a vnode from previously exported data. This is used when
+ * apphide reads back the marker file entries in a new process. */
+int vnode_import_and_restore(uint64_t vaddr, uint16_t vtype, uint32_t usecount, uint32_t iocount) {
+	/* Verify the vnode still exists by reading its current v_type */
+	uint16_t current = krw_read16(vaddr + OFF_V_TYPE);
+	if (current != 0) {
+		/* Not VBAD anymore — already restored */
+		return 0;
+	}
+	krw_write16(vaddr + OFF_V_TYPE, vtype);
+	krw_write32(vaddr + OFF_V_USECOUNT, usecount);
+	krw_write32(vaddr + OFF_V_IOCOUNT, iocount);
+	printf("restore: imported 0x%llx v_type=0x%x\n", (unsigned long long)vaddr, vtype);
+	return 0;
 }
 
 int proc_platformize(uint64_t proc) {

@@ -193,25 +193,10 @@ static int run_uicache(void) {
     return 0;
 }
 
-static void kill_lsd(void) {
-    pid_t pid = 0;
-    char *args[4];
-    args[0] = "/usr/bin/killall";
-    args[1] = "-9";
-    args[2] = "lsd";
-    args[3] = NULL;
-    const char *jb_killall = "/var/jb/usr/bin/killall";
-    if (access(jb_killall, X_OK) == 0) args[0] = (char *)jb_killall;
-    posix_spawn(&pid, args[0], NULL, NULL, args, environ);
-    waitpid(pid, NULL, 0);
-}
-
 static void refresh_ls(void) {
     printf("apphide: running uicache -a as mobile...\n");
     run_uicache();
-    printf("apphide: killing lsd to reload LS database...\n");
-    kill_lsd();
-    printf("apphide: LS database updated, icons should update shortly.\n");
+    printf("apphide: LS database updated.\n");
 }
 
 static int hide_app_path(const char *app_path) {
@@ -231,26 +216,73 @@ static int hide_app_path(const char *app_path) {
     vnode_hide_path(app_path);
 
     if (move_app(app_path, dst) != 0) return -1;
+
+    /* Export vnode data and persist to marker file for cross-process restore */
+    uint64_t vaddr = 0;
+    uint16_t vtype = 0;
+    uint32_t usecount = 0, iocount = 0;
+    vnode_export_last(&vaddr, &vtype, &usecount, &iocount);
+
+    char marker[PATH_MAX];
+    snprintf(marker, sizeof(marker), "%s/%s.hidden", STASH_DIR, name);
+    FILE *mf = fopen(marker, "w");
+    if (mf) {
+        fprintf(mf, "%s\n", app_path);
+        fprintf(mf, "0x%llx 0x%x 0x%x 0x%x\n",
+                (unsigned long long)vaddr, vtype, usecount, iocount);
+        fclose(mf);
+    }
+
     printf("apphide: hidden %s -> %s\n", app_path, dst);
     return 0;
 }
 
 static int unhide_by_name(const char *name) {
-    char src[PATH_MAX];
-    snprintf(src, sizeof(src), "%s/%s", STASH_DIR, name);
-    if (!file_exists(src)) {
-        fprintf(stderr, "apphide: %s is not in stash\n", name);
-        return -1;
+    char marker[PATH_MAX];
+    snprintf(marker, sizeof(marker), "%s/%s.hidden", STASH_DIR, name);
+    if (!file_exists(marker)) {
+        char src[PATH_MAX];
+        snprintf(src, sizeof(src), "%s/%s", STASH_DIR, name);
+        if (!file_exists(src)) {
+            fprintf(stderr, "apphide: %s is not in stash\n", name);
+            return -1;
+        }
+        char dst[PATH_MAX];
+        snprintf(dst, sizeof(dst), "%s/%s", JB_APPS_DIR, name);
+        if (move_app(src, dst) != 0) return -1;
+        printf("apphide: restored %s -> %s\n", name, dst);
+        return 0;
     }
 
+    FILE *mf = fopen(marker, "r");
+    if (!mf) return -1;
+    char app_path[PATH_MAX];
+    if (!fgets(app_path, sizeof(app_path), mf)) { fclose(mf); return -1; }
+    app_path[strcspn(app_path, "\n")] = '\0';
+
+    /* Read vnode data (optional, may be missing in legacy markers) */
+    uint64_t vaddr = 0;
+    uint16_t vtype = 2; /* default VDIR */
+    uint32_t usecount = 1, iocount = 1;
+    char vnode_line[128];
+    if (fgets(vnode_line, sizeof(vnode_line), mf)) {
+        sscanf(vnode_line, "0x%llx 0x%hx 0x%x 0x%x",
+               (unsigned long long *)&vaddr, &vtype, &usecount, &iocount);
+    }
+    fclose(mf);
+
+    char src[PATH_MAX];
+    snprintf(src, sizeof(src), "%s/%s", STASH_DIR, name);
     char dst[PATH_MAX];
     snprintf(dst, sizeof(dst), "%s/%s", JB_APPS_DIR, name);
 
     if (move_app(src, dst) != 0) return -1;
 
-    /* Restore vnode so the app is visible on filesystem again */
-    vnode_restore_all();
-
+    /* Restore vnode before uicache runs */
+    if (vaddr) {
+        vnode_import_and_restore(vaddr, vtype, usecount, iocount);
+    }
+    unlink(marker);
     printf("apphide: restored %s -> %s\n", name, dst);
     return 0;
 }
@@ -321,7 +353,10 @@ int apphide_unhide(const char *bundle_id) {
         return 0;
     }
     int rc = unhide_by_name(bundle_id);
-    if (rc == 0) refresh_ls();
+    if (rc == 0) {
+        vnode_restore_all();
+        refresh_ls();
+    }
     return rc;
 }
 
@@ -345,7 +380,10 @@ int apphide_unhide_all(void) {
         unhide_by_name(names[i]);
     }
     printf("apphide: restored %d hidden app(s)\n", n);
-    if (n > 0) refresh_ls();
+    if (n > 0) {
+        vnode_restore_all();
+        refresh_ls();
+    }
     return 0;
 }
 
