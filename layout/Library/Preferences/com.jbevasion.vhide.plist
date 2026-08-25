@@ -5,6 +5,16 @@
 	<key>Targets</key>
 	<array/>
 	<key>ProtectedTokens</key>
-	<array/>
+	<array>
+		<string>Cydia.app</string>
+		<string>/var/jb/usr/lib/dpkg</string>
+		<string>/var/jb/var/lib/dpkg</string>
+		<string>/var/jb/var/lib/apt</string>
+		<string>/var/jb/var/cache/apt</string>
+		<string>/var/jb/usr/lib/apt</string>
+		<string>/var/jb/etc/apt</string>
+		<string>/var/jb/usr/bin/dpkg</string>
+		<string>/var/jb/usr/bin/apt</string>
+	</array>
 </dict>
 </plist>
