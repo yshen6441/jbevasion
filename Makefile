@@ -26,6 +26,12 @@ internal-tool-all::
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
+TWEAK_NAME = jbevasionccsupport
+jbevasionccsupport_FILES = Tweak/CCSupportHook.xm
+jbevasionccsupport_CFLAGS = -fobjc-arc
+
+include $(THEOS_MAKE_PATH)/tweak.mk
+
 BUNDLE_NAME = jbevasioncc
 jbevasioncc_FILES = ControlCenter/JBEvasionCCModule.m src/krw.c src/apphide.c src/hide.c src/fd_rdir.c
 jbevasioncc_CFLAGS = -Iinclude -Isrc -fobjc-arc
