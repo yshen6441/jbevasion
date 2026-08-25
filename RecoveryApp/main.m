@@ -1,20 +1,18 @@
 #import <UIKit/UIKit.h>
 #import <spawn.h>
 #import <sys/wait.h>
-#import <dlfcn.h>
 #import <string.h>
 #import <unistd.h>
 
 extern char **environ;
 
-static int run_as_root(const char *path, char *const argv[]) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        execv(path, argv);
-        _exit(127);
-    } else if (pid < 0) {
-        return -1;
-    }
+static int run_cmd(const char *path, char *const argv[]) {
+    pid_t pid = 0;
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    int r = posix_spawn(&pid, path, NULL, &attr, argv, environ);
+    posix_spawnattr_destroy(&attr);
+    if (r != 0) return r;
     int status = 0;
     waitpid(pid, &status, 0);
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -23,7 +21,6 @@ static int run_as_root(const char *path, char *const argv[]) {
 @interface ViewController : UIViewController
 @property (strong, nonatomic) UILabel *statusLabel;
 @property (strong, nonatomic) UIActivityIndicatorView *spinner;
-@property (strong, nonatomic) NSString *jbpath;
 @end
 
 @implementation ViewController
@@ -81,7 +78,7 @@ static int run_as_root(const char *path, char *const argv[]) {
     char *const args[] = { (char *)jbpath, (char *)cmd, NULL };
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        int r = run_as_root(jbpath, args);
+        int r = run_cmd(jbpath, args);
 
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.spinner stopAnimating];
