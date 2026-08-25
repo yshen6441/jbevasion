@@ -39,5 +39,6 @@ jbevasionprefs_FILES = Preferences/JBRootListController.m
 jbevasionprefs_CFLAGS = -Iinclude -fobjc-arc
 jbevasionprefs_LDFLAGS = -undefined dynamic_lookup
 jbevasionprefs_INSTALL_PATH = /Library/PreferenceBundles
+jbevasionprefs_RESOURCE_FILES = Preferences/Root.plist Preferences/Info.plist
 
 include $(THEOS_MAKE_PATH)/bundle.mk
