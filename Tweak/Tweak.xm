@@ -61,7 +61,12 @@ static BOOL jbev_is_hidden(void) {
 	CGFloat yOffset = 18;
 	jbevToggleButton.frame = CGRectMake(safeLeft, yOffset, size, size);
 
-	if (state == 1) {
+	if (state == 3) {
+		[UIView animateWithDuration:0.2 animations:^{
+			jbevToggleButton.alpha = 0;
+			jbevToggleButton.transform = CGAffineTransformMakeScale(0.6, 0.6);
+		}];
+	} else {
 		jbevToggleButton.alpha = 0;
 		jbevToggleButton.transform = CGAffineTransformMakeScale(0.6, 0.6);
 		[UIView animateWithDuration:0.35 delay:0.0 usingSpringWithDamping:0.7
@@ -69,11 +74,6 @@ static BOOL jbev_is_hidden(void) {
 				jbevToggleButton.alpha = 1.0;
 				jbevToggleButton.transform = CGAffineTransformIdentity;
 			} completion:nil];
-	} else {
-		[UIView animateWithDuration:0.2 animations:^{
-			jbevToggleButton.alpha = 0;
-			jbevToggleButton.transform = CGAffineTransformMakeScale(0.6, 0.6);
-		}];
 	}
 }
 
