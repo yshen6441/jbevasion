@@ -26,10 +26,17 @@ internal-tool-all::
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
-TWEAK_NAME = jbevasionCC
+TWEAK_NAME = jbevasionCC jbevasionURLBlock
+
 jbevasionCC_FILES = Tweak/Tweak.xm
 jbevasionCC_CFLAGS = -fobjc-arc -Iinclude
 jbevasionCC_FRAMEWORKS = UIKit
+jbevasionCC_PLIST = Tweak/jbevasionCC.plist
+
+jbevasionURLBlock_FILES = Tweak/URLBlock.xm
+jbevasionURLBlock_CFLAGS = -fobjc-arc -Iinclude
+jbevasionURLBlock_FRAMEWORKS = UIKit
+jbevasionURLBlock_PLIST = Tweak/jbevasionURLBlock.plist
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
