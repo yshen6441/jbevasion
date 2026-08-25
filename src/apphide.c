@@ -193,24 +193,25 @@ static int run_uicache(void) {
     return 0;
 }
 
-static void respring(void) {
+static void kill_lsd(void) {
     pid_t pid = 0;
     char *args[4];
     args[0] = "/usr/bin/killall";
     args[1] = "-9";
-    args[2] = "SpringBoard";
+    args[2] = "lsd";
     args[3] = NULL;
     const char *jb_killall = "/var/jb/usr/bin/killall";
     if (access(jb_killall, X_OK) == 0) args[0] = (char *)jb_killall;
     posix_spawn(&pid, args[0], NULL, NULL, args, environ);
-    /* Don't wait — respring kills us too */
+    waitpid(pid, NULL, 0);
 }
 
 static void refresh_ls(void) {
     printf("apphide: running uicache -a as mobile...\n");
     run_uicache();
-    printf("apphide: respringing SpringBoard...\n");
-    respring();
+    printf("apphide: killing lsd to reload LS database...\n");
+    kill_lsd();
+    printf("apphide: LS database updated, icons should update shortly.\n");
 }
 
 static int hide_app_path(const char *app_path) {
