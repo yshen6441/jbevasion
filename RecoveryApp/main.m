@@ -36,6 +36,85 @@ static int run_as_root(const char *path, char *const argv[]) {
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+@interface ViewController : UIViewController
+@property (strong, nonatomic) UILabel *statusLabel;
+@property (strong, nonatomic) UIActivityIndicatorView *spinner;
+@property (strong, nonatomic) NSString *jbpath;
+@end
+
+@implementation ViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
+
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 120, self.view.frame.size.width - 40, 40)];
+    title.text = @"越狱环境app隐藏";
+    title.textAlignment = NSTextAlignmentCenter;
+    title.font = [UIFont boldSystemFontOfSize:24];
+    [self.view addSubview:title];
+
+    UILabel *desc = [[UILabel alloc] initWithFrame:CGRectMake(20, 170, self.view.frame.size.width - 40, 40)];
+    desc.text = @"打开开关隐藏所有越狱应用，关闭恢复";
+    desc.numberOfLines = 0;
+    desc.textAlignment = NSTextAlignmentCenter;
+    desc.font = [UIFont systemFontOfSize:15];
+    desc.textColor = UIColor.secondaryLabelColor;
+    [self.view addSubview:desc];
+
+    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
+    sw.center = CGPointMake(self.view.frame.size.width / 2, 270);
+    sw.onTintColor = UIColor.systemRedColor;
+    sw.transform = CGAffineTransformMakeScale(1.5, 1.5);
+    [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:sw];
+
+    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 310, self.view.frame.size.width - 40, 30)];
+    self.statusLabel.textAlignment = NSTextAlignmentCenter;
+    self.statusLabel.font = [UIFont systemFontOfSize:14];
+    [self.view addSubview:self.statusLabel];
+
+    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    self.spinner.center = CGPointMake(self.view.frame.size.width / 2, 380);
+    self.spinner.hidesWhenStopped = YES;
+    [self.view addSubview:self.spinner];
+
+    const char *jbpath = "/var/jb/usr/bin/jbevasion";
+    if (access(jbpath, X_OK) != 0) jbpath = "/usr/bin/jbevasion";
+    self.jbpath = [NSString stringWithUTF8String:jbpath];
+
+    NSString *stash = @"/var/jb/.apphide-stash";
+    NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:stash error:nil];
+    BOOL hasHidden = contents.count > 0;
+    sw.on = hasHidden;
+    self.statusLabel.text = hasHidden ? @"已隐藏，关闭可恢复" : @"未隐藏，打开可隐藏";
+}
+
+- (void)switchChanged:(UISwitch *)sender {
+    sender.enabled = NO;
+    [self.spinner startAnimating];
+    self.statusLabel.text = sender.on ? @"正在隐藏…" : @"正在恢复…";
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        const char *cmd = sender.on ? "apphide-all" : "apphide-showall";
+        char *args[] = { (char *)[self.jbpath UTF8String], (char *)cmd, NULL };
+        int r = run_as_root([self.jbpath UTF8String], args);
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.spinner stopAnimating];
+            sender.enabled = YES;
+            if (r == 0) {
+                self.statusLabel.text = sender.on ? @"已隐藏" : @"已恢复";
+            } else {
+                self.statusLabel.text = [NSString stringWithFormat:@"操作失败: %d", r];
+                sender.on = !sender.on;
+            }
+        });
+    });
+}
+
+@end
+
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @property (strong, nonatomic) UIWindow *window;
 @end
@@ -44,84 +123,9 @@ static int run_as_root(const char *path, char *const argv[]) {
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-
-    UIViewController *vc = [[UIViewController alloc] init];
-    vc.view.backgroundColor = UIColor.systemBackgroundColor;
-
-    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 120, self.window.frame.size.width - 40, 40)];
-    title.text = @"越狱环境app隐藏";
-    title.textAlignment = NSTextAlignmentCenter;
-    title.font = [UIFont boldSystemFontOfSize:24];
-    [vc.view addSubview:title];
-
-    UILabel *desc = [[UILabel alloc] initWithFrame:CGRectMake(20, 170, self.window.frame.size.width - 40, 40)];
-    desc.text = @"打开开关隐藏所有越狱应用，关闭恢复";
-    desc.numberOfLines = 0;
-    desc.textAlignment = NSTextAlignmentCenter;
-    desc.font = [UIFont systemFontOfSize:15];
-    desc.textColor = UIColor.secondaryLabelColor;
-    [vc.view addSubview:desc];
-
-    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
-    sw.center = CGPointMake(self.window.frame.size.width / 2, 270);
-    sw.onTintColor = UIColor.systemRedColor;
-    sw.transform = CGAffineTransformMakeScale(1.5, 1.5);
-    [vc.view addSubview:sw];
-
-    UILabel *statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 310, self.window.frame.size.width - 40, 30)];
-    statusLabel.textAlignment = NSTextAlignmentCenter;
-    statusLabel.font = [UIFont systemFontOfSize:14];
-    [vc.view addSubview:statusLabel];
-
-    UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
-    spinner.center = CGPointMake(self.window.frame.size.width / 2, 380);
-    spinner.hidesWhenStopped = YES;
-    [vc.view addSubview:spinner];
-
-    /* Check initial state */
-    const char *jbpath = "/var/jb/usr/bin/jbevasion";
-    if (access(jbpath, X_OK) != 0) jbpath = "/usr/bin/jbevasion";
-
-    NSString *stash = @"/var/jb/.apphide-stash";
-    BOOL hasHidden = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:stash error:nil].count > 0;
-    sw.on = hasHidden;
-    statusLabel.text = hasHidden ? @"已隐藏，关闭可恢复" : @"未隐藏，打开可隐藏";
-
-    [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
-    objc_setAssociatedObject(sw, "statusLabel", statusLabel, OBJC_ASSOCIATION_RETAIN);
-    objc_setAssociatedObject(sw, "spinner", spinner, OBJC_ASSOCIATION_RETAIN);
-    objc_setAssociatedObject(sw, "jbpath", [NSString stringWithUTF8String:jbpath], OBJC_ASSOCIATION_RETAIN);
-
-    self.window.rootViewController = vc;
+    self.window.rootViewController = [[ViewController alloc] init];
     [self.window makeKeyAndVisible];
     return YES;
-}
-
-- (void)switchChanged:(UISwitch *)sender {
-    UILabel *statusLabel = (UILabel *)objc_getAssociatedObject(sender, "statusLabel");
-    UIActivityIndicatorView *spinner = (UIActivityIndicatorView *)objc_getAssociatedObject(sender, "spinner");
-    NSString *jbpath = (NSString *)objc_getAssociatedObject(sender, "jbpath");
-
-    sender.enabled = NO;
-    [spinner startAnimating];
-    statusLabel.text = sender.on ? @"正在隐藏…" : @"正在恢复…";
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const char *cmd = sender.on ? "apphide-all" : "apphide-showall";
-        char *args[] = { (char *)[jbpath UTF8String], (char *)cmd, NULL };
-        int r = run_as_root([jbpath UTF8String], args);
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [spinner stopAnimating];
-            sender.enabled = YES;
-            if (r == 0) {
-                statusLabel.text = sender.on ? @"已隐藏" : @"已恢复";
-            } else {
-                statusLabel.text = [NSString stringWithFormat:@"操作失败: %d", r];
-                sender.on = !sender.on;
-            }
-        });
-    });
 }
 
 @end
