@@ -20,8 +20,8 @@
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>0.1.0</string>
-    <key>NSPrincipalClass</key>
-    <string>PSListController</string>
+<key>NSPrincipalClass</key>
+	<string>JBRootListController</string>
     <key>MinimumOSVersion</key>
     <string>15.0</string>
 </dict>
