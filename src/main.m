@@ -10,6 +10,7 @@
 #include "hide.h"
 #include "fd_rdir.h"
 #include "apphide.h"
+#include "vhide.h"
 
 #include <spawn.h>
 #include <sys/wait.h>
@@ -60,6 +61,10 @@ static void print_usage(void) {
 	printf("  apphide-show <id>  Restore one hidden app\n");
 	printf("  apphide-showall    Restore all hidden apps\n");
 	printf("  apphide-status     Show hidden/visible app status\n");
+	printf("  vhide <path>       Hide one path via vnode VBAD (safe targets only)\n");
+	printf("  vhide-all          Hide all known safe targets (bash/sshd/apt/frida...)\n");
+	printf("  vhide-showall      Restore all hidden vnodes\n");
+	printf("  vhide-status       Show protected rules + per-target VBAD state\n");
 	printf("  help               Show this message\n");
 }
 
@@ -381,6 +386,25 @@ static int cmd_platformize(void) {
 	return proc_hide_self();
 }
 
+static int cmd_vhide(int argc, char *argv[]) {
+	int ret = krw_init();
+	if (ret != 0) {
+		printf("[-] krw_init failed (%d)\n", ret);
+		return 1;
+	}
+	if (argc >= 3 && strcmp(argv[2], "all") == 0) {
+		return vhide_known();
+	} else if (argc >= 3 && strcmp(argv[2], "showall") == 0) {
+		return vhide_restore_all();
+	} else if (argc >= 3 && strcmp(argv[2], "status") == 0) {
+		return vhide_status();
+	} else if (argc >= 3) {
+		return vhide_path(argv[2]);
+	}
+	printf("usage: vhide <path|all|showall|status>\n");
+	return 1;
+}
+
 static int cmd_respring(void) {
 	uid_t uid = getuid();
 	if (uid != 0) {
@@ -493,6 +517,16 @@ int main(int argc, char *argv[]) {
 		return apphide_unhide_all();
 	} else if (strcmp(cmd, "apphide-status") == 0) {
 		return apphide_status();
+	} else if (strcmp(cmd, "vhide") == 0) {
+		return cmd_vhide(argc, argv);
+	} else if (strcmp(cmd, "vhide-all") == 0) {
+		if (krw_init() != 0) return 1;
+		return vhide_known();
+	} else if (strcmp(cmd, "vhide-showall") == 0) {
+		if (krw_init() != 0) return 1;
+		return vhide_restore_all();
+	} else if (strcmp(cmd, "vhide-status") == 0) {
+		return vhide_status();
 	} else if (strcmp(cmd, "respring") == 0) {
 		return cmd_respring();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {
