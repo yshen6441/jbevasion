@@ -375,18 +375,28 @@ int apphide_unhide_all(void) {
         return 0;
     }
     struct dirent *ent;
-    char names[128][128];
+    char **names = NULL;
     int n = 0;
-    while ((ent = readdir(d)) != NULL && n < 128) {
+    while ((ent = readdir(d)) != NULL) {
         if (ent->d_name[0] == '.') continue;
-        if (strstr(ent->d_name, ".app") != NULL) {
-            strlcpy(names[n++], ent->d_name, sizeof(names[0]));
+        if (strstr(ent->d_name, ".app") == NULL) continue;
+        char **tmp = realloc(names, sizeof(char *) * (n + 1));
+        if (!tmp) {
+            fprintf(stderr, "apphide: realloc failed collecting hidden apps\n");
+            for (int i = 0; i < n; i++) free(names[i]);
+            free(names);
+            closedir(d);
+            return -1;
         }
+        names = tmp;
+        names[n++] = strdup(ent->d_name);
     }
     closedir(d);
     for (int i = 0; i < n; i++) {
         unhide_by_name(names[i]);
+        free(names[i]);
     }
+    free(names);
     printf("apphide: restored %d hidden app(s)\n", n);
     if (n > 0) {
         vnode_restore_all();
