@@ -36,8 +36,8 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 
 BUNDLE_NAME = jbevasionprefs
 jbevasionprefs_FILES = Preferences/JBRootListController.m
-jbevasionprefs_CFLAGS = -fobjc-arc
-jbevasionprefs_PRIVATE_FRAMEWORKS = Preferences
+jbevasionprefs_CFLAGS = -Iinclude -fobjc-arc
+jbevasionprefs_LDFLAGS = -undefined dynamic_lookup
 jbevasionprefs_INSTALL_PATH = /Library/PreferenceBundles
 
 include $(THEOS_MAKE_PATH)/bundle.mk
