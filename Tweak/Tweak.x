@@ -1,4 +1,5 @@
 #include <objc/runtime.h>
+#include <Foundation/Foundation.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <dispatch/dispatch.h>
 #include "krw.h"
