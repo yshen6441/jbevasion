@@ -168,7 +168,7 @@ int vhide_config_load(void) {
 		if (data) {
 			size_t got = fread(data, 1, (size_t)size, fp);
 			if (got == (size_t)size) {
-				cfdata = CFDataCreateWithBytesNoCopy(NULL, (const UInt8 *)data, (CFIndex)size, kCFAllocatorNull);
+				cfdata = CFDataCreate(NULL, (const UInt8 *)data, (CFIndex)size);
 			}
 			free(data);
 		}
@@ -180,8 +180,15 @@ int vhide_config_load(void) {
 	CFPropertyListRef plist = CFPropertyListCreateWithData(NULL, cfdata, kCFPropertyListImmutable, NULL, &err);
 	CFRelease(cfdata);
 	if (!plist) {
-		if (err) CFRelease(err);
-		fprintf(stderr, "vhide: failed to parse %s\n", VHIDE_CONFIG_PATH);
+		if (err) {
+			char errbuf[512];
+			if (CFStringGetCString(err, errbuf, sizeof(errbuf), kCFStringEncodingUTF8)) {
+				fprintf(stderr, "vhide: failed to parse %s: %s\n", VHIDE_CONFIG_PATH, errbuf);
+			}
+			CFRelease(err);
+		} else {
+			fprintf(stderr, "vhide: failed to parse %s (unknown error)\n", VHIDE_CONFIG_PATH);
+		}
 		return -1;
 	}
 
