@@ -35,7 +35,7 @@ static const char *g_protected_builtin[] = {
 /* Config plist keys */
 #define VHIDE_KEY_TARGETS    CFSTR("Targets")
 #define VHIDE_KEY_PROTECTED  CFSTR("ProtectedTokens")
-#define VHIDE_KEY_APPS       CFSTR("ProtectedApps")
+#define VHIDE_KEY_APPS       CFSTR("HideApps")
 
 #define VHIDE_MAX_CUSTOM 256
 
@@ -219,9 +219,9 @@ int vhide_status(void) {
 	for (int i = 0; i < g_custom_protected_count; i++) {
 		printf("  %s\n", g_custom_protected[i]);
 	}
-	printf("vhide: apphide protected apps (ProtectedApps):\n");
+	printf("vhide: apphide hide list (HideApps):\n");
 	if (g_custom_app_count == 0) {
-		printf("  (none - all apps will be hidden)\n");
+		printf("  (none - no apps will be hidden by apphide-all)\n");
 	}
 	for (int i = 0; i < g_custom_app_count; i++) {
 		printf("  %s\n", g_custom_apps[i]);

@@ -77,10 +77,10 @@ jbevasion vhide-reload      # 重载配置文件
     <array>
         <string>/var/jb/usr/bin/sileo</string>
     </array>
-    <key>ProtectedApps</key>
+    <key>HideApps</key>
     <array>
         <string>Cydia</string>
-        <string>MyApp</string>
+        <string>Sileo</string>
     </array>
     <key>BlockedURLSchemes</key>
     <array>
@@ -96,9 +96,9 @@ jbevasion vhide-reload      # 重载配置文件
 - `ProtectedTokens`：你的白名单。目标路径只要包含其中任一子串就永不隐藏。
   内置的运行时必需规则（`libjailbreak`/`TweakInject`/`ellekit`/`substrate`/`jailbreakd`/`jbevasion`）
   始终生效，不会因配置文件而解除
-- `ProtectedApps`：**apphide 应用白名单**。按应用名或 Bundle ID 的子串匹配，
-  `apphide-all` / `apphide-known` / `apphide <id>` 隐藏时都会跳过这些应用。
-  **完全由 plist 控制，无内置白名单**——`ProtectedApps` 为空时所有应用都会被隐藏
+- `HideApps`：**apphide 隐藏黑名单**。写在里面的应用才会被隐藏，没写的不动。
+  `apphide-all` 只隐藏列表中匹配的应用，其余全部保留。
+  **完全由 plist 控制**——`HideApps` 为空时 `apphide-all` 什么也不藏
 - `BlockedURLSchemes`：**URL Scheme 拦截**。hook `UIApplication -canOpenURL:`，
   任何应用查询列出的 scheme 都返回 NO，绕过 `cydia://` 等越狱检测。
   修改后重启桌面生效

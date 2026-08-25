@@ -200,7 +200,7 @@ static void refresh_ls(void) {
     printf("apphide: LS database updated.\n");
 }
 
-static int is_protected_app(const char *app_path) {
+static int is_app_in_hide_list(const char *app_path) {
     const char *slash = strrchr(app_path, '/');
     const char *name = slash ? slash + 1 : app_path;
     char base[128];
@@ -223,8 +223,8 @@ static int hide_app_path(const char *app_path) {
     const char *slash = strrchr(app_path, '/');
     const char *name = slash ? slash + 1 : app_path;
 
-    if (is_protected_app(app_path)) {
-        printf("apphide: skipping protected app %s (whitelisted)\n", app_path);
+    if (!is_app_in_hide_list(app_path)) {
+        printf("apphide: skipping %s (not in HideApps blacklist)\n", app_path);
         return 1;
     }
 
