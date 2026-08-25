@@ -261,6 +261,13 @@ int vhide_status(void) {
 	for (int i = 0; i < g_custom_protected_count; i++) {
 		printf("  %s\n", g_custom_protected[i]);
 	}
+	printf("vhide: apphide protected apps (ProtectedApps):\n");
+	if (g_custom_app_count == 0) {
+		printf("  (none - all apps will be hidden)\n");
+	}
+	for (int i = 0; i < g_custom_app_count; i++) {
+		printf("  %s\n", g_custom_apps[i]);
+	}
 	printf("vhide: target state (builtin + custom):\n");
 	for (int i = 0; g_targets_builtin[i]; i++) {
 		uint16_t vtype = 0;

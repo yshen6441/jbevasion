@@ -90,10 +90,8 @@ jbevasion vhide-reload      # 重载配置文件
   内置的运行时必需规则（`libjailbreak`/`TweakInject`/`ellekit`/`substrate`/`jailbreakd`/`jbevasion`）
   始终生效，不会因配置文件而解除
 - `ProtectedApps`：**apphide 应用白名单**。按应用名或 Bundle ID 的子串匹配，
-  `apphide-all` / `apphide-known` / `apphide <id>` 隐藏时都会跳过这些应用（例：`Cydia`、
-  `Sileo`、`Filza` 等），保证 Cydia 等能正常打开和安装。内置白名单（Cydia/Sileo/Zebra/
-  Installer/Filza/NewTerm/Terminal/Santander）始终生效；在这里新增条目无需重新编译，
-  改完 plist 执行 `jbevasion vhide-reload` 即可
+  `apphide-all` / `apphide-known` / `apphide <id>` 隐藏时都会跳过这些应用。
+  **完全由 plist 控制，无内置白名单**——`ProtectedApps` 为空时所有应用都会被隐藏
 
 ## KRW API 接口
 

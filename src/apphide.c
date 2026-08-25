@@ -21,26 +21,6 @@ extern char **environ;
 #define JB_APPS_DIR   "/var/jb/Applications"
 #define STASH_DIR     "/var/jb/.apphide-stash"
 
-/*
- * Apps that must NEVER be hidden: package managers and essential tools the
- * user needs even in hiding mode. apphide-all / apphide-known / apphide <id>
- * all skip these so the jailbreak stays usable (e.g. Cydia to install debs).
- */
-static const char *g_protected_apps[] = {
-    "Cydia",
-    "Sileo",
-    "Zebra",
-    "Installer",
-    "Installer 5",
-    "Filza",
-    "FilzaFileManager",
-    "NewTerm",
-    "NewTerm 2",
-    "Terminal",
-    "Santander",
-    NULL,
-};
-
 static const char *known_ids[] = {
     "Sileo",
     "Cydia",
@@ -227,12 +207,6 @@ static int is_protected_app(const char *app_path) {
     strip_app_suffix(name, base, sizeof(base));
 
     char *bid = read_bundle_id(app_path);
-    for (int i = 0; g_protected_apps[i]; i++) {
-        if (strstr(base, g_protected_apps[i]) || (bid && strstr(bid, g_protected_apps[i]))) {
-            free(bid);
-            return 1;
-        }
-    }
     for (int i = 0; i < vhide_protected_app_count(); i++) {
         const char *p = vhide_protected_app_at(i);
         if (!p) continue;
