@@ -31,7 +31,6 @@ jbevasiontweak_FILES = Tweak/Tweak.xm
 jbevasiontweak_CFLAGS = -Iinclude -Isrc -fobjc-arc
 jbevasiontweak_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib
 jbevasiontweak_FRAMEWORKS = UIKit
-jbevasiontweak_PRIVATE_FRAMEWORKS = Preferences
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
