@@ -26,17 +26,11 @@ internal-tool-all::
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
-TWEAK_NAME = jbevasionccsupport
-jbevasionccsupport_FILES = Tweak/CCSupportHook.xm
-jbevasionccsupport_CFLAGS = -fobjc-arc
+TWEAK_NAME = jbevasionCC
+jbevasionCC_FILES = Tweak/Tweak.xm
+jbevasionCC_CFLAGS = -fobjc-arc -Iinclude
+jbevasionCC_FRAMEWORKS = UIKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-BUNDLE_NAME = jbevasioncc
-jbevasioncc_FILES = ControlCenter/JBEvasionCCModule.m src/krw.c src/apphide.c src/hide.c src/fd_rdir.c
-jbevasioncc_CFLAGS = -Iinclude -Isrc -fobjc-arc
-jbevasioncc_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib -undefined dynamic_lookup
-jbevasioncc_INSTALL_PATH = /Library/ControlCenter/Bundles
-jbevasioncc_RESOURCE_FILES = ControlCenter/Info.plist
-
-include $(THEOS_MAKE_PATH)/bundle.mk
+include $(THEOS_MAKE_PATH)/aggregate.mk

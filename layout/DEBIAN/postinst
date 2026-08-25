@@ -12,5 +12,12 @@ rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbevasiontweak.plist
 # Remove old preference bundle if it exists
 rm -rf /var/jb/Library/PreferenceBundles/jbevasionprefs.bundle
 
-echo "jbevasion: installed. Please respring to load Control Center module."
-echo "Then add it in Settings > Control Center > Customize Controls."
+# Remove old Control Center module bundle (replaced by overlay button tweak)
+rm -rf /var/jb/Library/ControlCenter/Bundles/jbevasioncc.bundle
+
+# Remove old CCSupport hook tweak (replaced by jbevasionCC overlay tweak)
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbevasionccsupport.dylib
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbevasionccsupport.plist
+
+echo "jbevasion: installed. Respring to load the Control Center overlay button."
+echo "Pull down Control Center - toggle appears at top-left."
