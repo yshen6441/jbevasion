@@ -16,5 +16,15 @@
 		<string>/var/jb/usr/bin/dpkg</string>
 		<string>/var/jb/usr/bin/apt</string>
 	</array>
+	<key>ProtectedApps</key>
+	<array>
+		<string>Cydia</string>
+		<string>Sileo</string>
+		<string>Zebra</string>
+		<string>Installer</string>
+		<string>Filza</string>
+		<string>NewTerm</string>
+		<string>Terminal</string>
+	</array>
 </dict>
 </plist>

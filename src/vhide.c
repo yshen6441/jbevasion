@@ -70,6 +70,7 @@ static const char *g_targets_builtin[] = {
 /* Config plist keys */
 #define VHIDE_KEY_TARGETS    CFSTR("Targets")
 #define VHIDE_KEY_PROTECTED  CFSTR("ProtectedTokens")
+#define VHIDE_KEY_APPS       CFSTR("ProtectedApps")
 
 #define VHIDE_MAX_CUSTOM 256
 
@@ -77,6 +78,8 @@ static char *g_custom_targets[VHIDE_MAX_CUSTOM];
 static int g_custom_target_count = 0;
 static char *g_custom_protected[VHIDE_MAX_CUSTOM];
 static int g_custom_protected_count = 0;
+static char *g_custom_apps[VHIDE_MAX_CUSTOM];
+static int g_custom_app_count = 0;
 
 static int is_protected(const char *path) {
 	if (!path) return 1;
@@ -123,6 +126,8 @@ static void free_custom(void) {
 	g_custom_target_count = 0;
 	for (int i = 0; i < g_custom_protected_count; i++) free(g_custom_protected[i]);
 	g_custom_protected_count = 0;
+	for (int i = 0; i < g_custom_app_count; i++) free(g_custom_apps[i]);
+	g_custom_app_count = 0;
 }
 
 static void load_string_array(CFArrayRef arr, char *dest[], int *count) {
@@ -190,12 +195,25 @@ int vhide_config_load(void) {
 		if (v && CFGetTypeID(v) == CFArrayGetTypeID()) {
 			load_string_array((CFArrayRef)v, g_custom_protected, &g_custom_protected_count);
 		}
+		v = CFDictionaryGetValue(dict, VHIDE_KEY_APPS);
+		if (v && CFGetTypeID(v) == CFArrayGetTypeID()) {
+			load_string_array((CFArrayRef)v, g_custom_apps, &g_custom_app_count);
+		}
 	}
 	CFRelease(plist);
 
-	printf("vhide: config loaded (%d custom targets, %d custom protected)\n",
-	       g_custom_target_count, g_custom_protected_count);
+	printf("vhide: config loaded (%d custom targets, %d custom protected, %d custom apps)\n",
+	       g_custom_target_count, g_custom_protected_count, g_custom_app_count);
 	return 0;
+}
+
+int vhide_protected_app_count(void) {
+	return g_custom_app_count;
+}
+
+const char *vhide_protected_app_at(int i) {
+	if (i < 0 || i >= g_custom_app_count) return NULL;
+	return g_custom_apps[i];
 }
 
 int vhide_known(void) {

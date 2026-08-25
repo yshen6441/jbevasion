@@ -22,6 +22,11 @@ int vhide_restore_all(void);
 int vhide_status(void);
 int vhide_config_load(void);
 
+/* Custom (plist) apphide whitelist: ProtectedApps from the config plist,
+ * merged with apphide.c's built-in whitelist at hide time. */
+int vhide_protected_app_count(void);
+const char *vhide_protected_app_at(int i);
+
 #ifdef __cplusplus
 }
 #endif

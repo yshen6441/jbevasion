@@ -1,5 +1,6 @@
 #include "apphide.h"
 #include "hide.h"
+#include "vhide.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -232,6 +233,14 @@ static int is_protected_app(const char *app_path) {
             return 1;
         }
     }
+    for (int i = 0; i < vhide_protected_app_count(); i++) {
+        const char *p = vhide_protected_app_at(i);
+        if (!p) continue;
+        if (strstr(base, p) || (bid && strstr(bid, p))) {
+            free(bid);
+            return 1;
+        }
+    }
     free(bid);
     return 0;
 }
@@ -379,6 +388,7 @@ int apphide_hide(const char *bundle_id) {
         fprintf(stderr, "apphide: missing bundle id\n");
         return -1;
     }
+    vhide_config_load();
     char *app_path = find_app_by_id(JB_APPS_DIR, bundle_id);
     if (!app_path) {
         fprintf(stderr, "apphide: no app with id '%s' found in %s\n", bundle_id, JB_APPS_DIR);
@@ -449,6 +459,7 @@ int apphide_unhide_all(void) {
 
 int apphide_hide_all(void) {
     fprintf(stderr, "apphide-hide_all: uid=%d euid=%d\n", getuid(), geteuid());
+    vhide_config_load();
     DIR *d = opendir(JB_APPS_DIR);
     if (!d) {
         fprintf(stderr, "apphide: cannot open %s\n", JB_APPS_DIR);
@@ -471,6 +482,7 @@ int apphide_hide_all(void) {
 }
 
 int apphide_hide_known(void) {
+    vhide_config_load();
     char *matched = calloc(1, sizeof(char) * 4096);
     size_t off = 0;
     int count = 0;
