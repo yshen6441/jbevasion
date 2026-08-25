@@ -35,13 +35,12 @@ static void print_usage(void) {
 	printf("  hide               (deprecated) Per-process cleanup only\n");
 	printf("  restore            (deprecated) No-op\n");
 	printf("  apphide list       List jailbroken apps in /var/jb/Applications\n");
-	printf("  apphide <bundleid> Hide one app (moves .app into stash)\n");
+	printf("  apphide <bundleid> Hide one app (kernel vnode VBAD)\n");
 	printf("  apphide-known      Hide well-known package managers (Sileo/Cydia/Filza...)\n");
 	printf("  apphide-all        Hide every app in /var/jb/Applications\n");
-	printf("  apphide-show <id>  Restore one hidden app back to /var/jb/Applications\n");
-	printf("  apphide-showall    Restore everything from the stash\n");
-	printf("  apphide-resync     Refresh LaunchServices (uicache -a as mobile) so\n");
-	printf("                     hidden/restored icons update + respring\n");
+	printf("  apphide-show <id>  Restore one hidden app\n");
+	printf("  apphide-showall    Restore all hidden apps\n");
+	printf("  apphide-status     Show hidden/visible app status\n");
 	printf("  help               Show this message\n");
 }
 
@@ -363,75 +362,6 @@ static int cmd_platformize(void) {
 	return proc_hide_self();
 }
 
-/* Run uicache as the mobile user so LaunchServices rebuilds its
- * per-user registration database from a fresh directory scan of
- * /var/jb/Applications/. Bundles we stashed are gone from disk, so they
- * drop out of the icon model. */
-static int run_uicache(char *const args[], char *errbuf, size_t errsz) {
-	pid_t child = fork();
-	if (child < 0) {
-		fprintf(stderr, "apphide: fork failed: %s\n", strerror(errno));
-		return -1;
-	}
-	if (child == 0) {
-		setgid(501);
-		setuid(501);
-		execv(args[0], args);
-		_exit(127);
-	}
-	int status = 0;
-	waitpid(child, &status, 0);
-	if (errbuf && errsz) errbuf[0] = '\0';
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-		int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-		fprintf(stderr, "apphide: uicache exited with status %d\n", rc);
-		return rc;
-	}
-	return 0;
-}
-
-static const char *find_uicache(void) {
-	static const char *candidates[] = {
-		"/var/jb/usr/bin/uicache",
-		"/var/jb/usr/bin/uicache-strapped",
-		"/usr/bin/uicache",
-		NULL,
-	};
-	for (int i = 0; candidates[i]; i++) {
-		if (access(candidates[i], X_OK) == 0)
-			return candidates[i];
-	}
-	return NULL;
-}
-
-static void ls_refresh_callback_impl(void) {
-	const char *uc = find_uicache();
-	if (uc) {
-		printf("apphide: refreshing LaunchServices with %s -a (as mobile)...\n", uc);
-		char *args[] = { (char *)uc, "-a", NULL };
-		run_uicache(args, NULL, 0);
-	} else {
-		fprintf(stderr, "apphide: no uicache found\n");
-	}
-
-	/* respring SpringBoard so icons update */
-	printf("apphide: respringing SpringBoard…\n");
-	pid_t sbpid = 0;
-	char *args[4];
-	args[0] = "/usr/bin/killall";
-	args[1] = "-9";
-	args[2] = "SpringBoard";
-	args[3] = NULL;
-	const char *jb_killall = "/var/jb/usr/bin/killall";
-	if (access(jb_killall, X_OK) == 0)
-		args[0] = (char *)jb_killall;
-	posix_spawn(&sbpid, args[0], NULL, NULL, args, environ);
-	printf("apphide: SpringBoard restarted, icons updated.\n");
-}
-
-/* Safe userspace respring: restart SpringBoard so the icon model rescans.
- * This is NOT a kernel operation, does not touch vnodes/mounts, and cannot
- * panic — worst case is the UI goes black for a second and comes back. */
 static int cmd_respring(void) {
 	uid_t uid = getuid();
 	if (uid != 0) {
@@ -471,9 +401,6 @@ static int cmd_respring(void) {
 }
 
 int main(int argc, char *argv[]) {
-	/* Register the LS refresh callback for apphide (TrollStore-style _LSRefresh + respring) */
-	apphide_ls_refresh_callback = ls_refresh_callback_impl;
-
 	if (argc < 2) {
 		print_usage();
 		return 0;
@@ -505,32 +432,48 @@ int main(int argc, char *argv[]) {
 	} else if (strcmp(cmd, "platformize") == 0) {
 		return cmd_platformize();
 	} else if (strcmp(cmd, "apphide") == 0) {
+		int ret = krw_init();
+		if (ret != 0) {
+			printf("[-] krw_init failed (%d)\n", ret);
+			return 1;
+		}
 		if (argc >= 3 && strcmp(argv[2], "list") == 0) {
 			return apphide_list();
 		} else if (argc >= 3 && strcmp(argv[2], "all") == 0) {
 			return apphide_hide_all();
 		} else if (argc >= 3 && strcmp(argv[2], "known") == 0) {
 			return apphide_hide_known();
+		} else if (argc >= 3 && strcmp(argv[2], "show") == 0) {
+			if (argc >= 4) return apphide_unhide(argv[3]);
+			return apphide_unhide_all();
+		} else if (argc >= 3 && strcmp(argv[2], "showall") == 0) {
+			return apphide_unhide_all();
+		} else if (argc >= 3 && strcmp(argv[2], "status") == 0) {
+			return apphide_status();
 		} else if (argc >= 3) {
 			return apphide_hide(argv[2]);
 		}
 		print_usage();
 		return 1;
 	} else if (strcmp(cmd, "apphide-known") == 0) {
+		if (krw_init() != 0) return 1;
 		return apphide_hide_known();
 	} else if (strcmp(cmd, "apphide-all") == 0) {
+		if (krw_init() != 0) return 1;
 		return apphide_hide_all();
 	} else if (strcmp(cmd, "apphide-list") == 0) {
 		return apphide_list();
 	} else if (strcmp(cmd, "apphide-show") == 0) {
+		if (krw_init() != 0) return 1;
 		if (argc >= 3) {
 			return apphide_unhide(argv[2]);
 		}
 		return apphide_unhide_all();
 	} else if (strcmp(cmd, "apphide-showall") == 0) {
+		if (krw_init() != 0) return 1;
 		return apphide_unhide_all();
-	} else if (strcmp(cmd, "apphide-resync") == 0) {
-		return apphide_refresh_ls();
+	} else if (strcmp(cmd, "apphide-status") == 0) {
+		return apphide_status();
 	} else if (strcmp(cmd, "respring") == 0) {
 		return cmd_respring();
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "-h") == 0) {
