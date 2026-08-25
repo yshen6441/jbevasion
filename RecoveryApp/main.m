@@ -4,8 +4,6 @@
 #import <string.h>
 #import <unistd.h>
 #import <fcntl.h>
-#import <dlfcn.h>
-
 extern char **environ;
 
 @interface ViewController : UIViewController
@@ -96,18 +94,7 @@ extern char **environ;
     [self appendLog:[NSString stringWithFormat:@"cmd: %s %s", jbpath, cmd]];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        /* Load persona API */
-        static int (*persona_set)(const posix_spawnattr_t * __restrict, int, uid_t) = NULL;
-        static int (*persona_uid)(const posix_spawnattr_t * __restrict, uid_t) = NULL;
-        static int (*persona_gid)(const posix_spawnattr_t * __restrict, gid_t) = NULL;
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{
-            persona_set = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_persona_np");
-            persona_uid = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_persona_uid_np");
-            persona_gid = dlsym(RTLD_DEFAULT, "posix_spawnattr_set_persona_gid_np");
-            [self appendLog:[NSString stringWithFormat:@"persona: set=%p uid=%p gid=%p",
-                           persona_set, persona_uid, persona_gid]];
-        });
+        [self appendLog:@"persona: skipped (causes ESRCH), relying on setuid bit"];
 
         int out_pipe[2], err_pipe[2];
         pipe(out_pipe);
@@ -123,15 +110,6 @@ extern char **environ;
         pid_t pid = 0;
         posix_spawnattr_t attr;
         posix_spawnattr_init(&attr);
-        if (persona_set) {
-            persona_set(&attr, 1, 0);
-            persona_uid(&attr, 0);
-            persona_gid(&attr, 0);
-            [self appendLog:@"persona: set type=1 uid=0 gid=0"];
-        } else {
-            [self appendLog:@"persona: API not available, will run as mobile"];
-        }
-
         char *const args[] = { (char *)jbpath, (char *)cmd, NULL };
         int spawn_rc = posix_spawn(&pid, jbpath, &actions, &attr, args, environ);
         posix_spawnattr_destroy(&attr);
