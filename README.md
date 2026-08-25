@@ -1,75 +1,69 @@
 # jbevasion
 
-Jailbreak environment hiding controller for Dopamine (iOS 15-18, arm64/arm64e).
+面向 Dopamine（iOS 15-18，arm64/arm64e）的越狱环境隐藏控制器。
 
-Kernel read/write is provided by Dopamine's `libjailbreak.dylib`
-(`/var/jb/usr/lib/libjailbreak.dylib`), resolved at runtime through
-`-rpath /var/jb/usr/lib`. The `stub/` directory holds a **link-time only**
-dylib so the project builds on hosts without the real library; the stub is
-never executed on device.
+内核读写由 Dopamine 的 `libjailbreak.dylib`（`/var/jb/usr/lib/libjailbreak.dylib`）
+提供，运行时通过 `-rpath /var/jb/usr/lib` 解析。`stub/` 目录保存一份**仅用于链接期**
+的 dylib，让项目可以在没有真实库的主机上完成构建；stub 在设备上永远不会被执行。
 
-## What it does
+## 功能
 
-Two components ship in the `.deb`:
+`.deb` 包内包含两个组件：
 
-1. **`jbevasion` CLI** (setuid root 6755) — CoreFoundation-based app hiding.
-   Moves jailbreak apps out of `/var/jb/Applications` into a stash at
-   `/var/jb/.apphide-stash/`, marks their vnodes `VBAD` so filesystem access
-   fails immediately, persists the vnode state to `.hidden` marker files
-   (so restore works across process restarts), refreshes LaunchServices via
-   `uicache -a`, and resprings.
+1. **`jbevasion` CLI**（setuid root 6755）—— 基于 CoreFoundation 的应用隐藏。
+   把越狱应用从 `/var/jb/Applications` 移动到藏身处 `/var/jb/.apphide-stash/`，
+   并将其 vnode 标记为 `VBAD`，使文件系统访问立即失败；vnode 状态持久化到
+   `.hidden` 标记文件（保证跨进程重启后仍然可以恢复）；通过 `uicache -a`
+   刷新 LaunchServices 并 respring。
 
-2. **`jbevasionCC` tweak** — injects a one-tap eye toggle into Control
-   Center (top-left) by hooking
-   `CCUIModularControlCenterOverlayViewController -setPresentationState:`.
-   Green `eye.fill` = apps visible; orange `eye.slash.fill` = apps hidden.
-   Tapping spawns `jbevasion apphide-all` / `apphide-showall`. No external
-   Control Center module or CCSupport dependency.
+2. **`jbevasionCC` tweak** —— 在控制中心左上角注入一个一键切换的眼睛按钮，
+   通过 hook `CCUIModularControlCenterOverlayViewController -setPresentationState:`
+   实现。绿色 `eye.fill` = 应用可见；橙色 `eye.slash.fill` = 应用已隐藏。
+   点击会调用 `jbevasion apphide-all` / `apphide-showall`。
+   不依赖任何外部控制中心模块或 CCSupport。
 
-## Install
+## 安装
 
-Build:
+构建：
 
 ```sh
 gmake clean
 gmake package FINALPACKAGE=1
 ```
 
-Install the resulting `.deb` with Sileo/Sileo-root or `dpkg -i`, then respring.
-Pull down Control Center — the eye toggle appears at top-left.
+安装生成的 `.deb`（Sileo/Sileo-root 或 `dpkg -i`），然后 respring。
+下拉控制中心，左上角就会出现眼睛切换按钮。
 
-## CLI usage
+## CLI 用法
 
 ```sh
-jbevasion apphide list        # list visible + hidden apps
-jbevasion apphide status      # hide/visible status for each app
-jbevasion apphide-all         # hide every app in /var/jb/Applications
-jbevasion apphide-showall     # restore all hidden apps
-jbevasion apphide <bundleid>  # hide one app
-jbevasion apphide-show <id>   # restore one hidden app
-jbevasion apphide-known       # hide well-known package managers
+jbevasion apphide list        # 列出可见 + 已隐藏的应用
+jbevasion apphide status      # 每个应用的隐藏/可见状态
+jbevasion apphide-all         # 隐藏 /var/jb/Applications 下所有应用
+jbevasion apphide-showall     # 恢复所有隐藏应用
+jbevasion apphide <bundleid>  # 隐藏单个应用
+jbevasion apphide-show <id>   # 恢复单个隐藏应用
+jbevasion apphide-known       # 隐藏知名包管理器
 ```
 
-Hiding an app is reversible; the `.app` directory is moved back and the
-vnode is restored before `uicache` runs.
+隐藏操作可逆：恢复时先把 `.app` 目录移回原处并还原 vnode，再运行 `uicache`。
 
-## KRW API surface
+## KRW API 接口
 
-The thin C wrapper in `src/krw.h` / `src/krw.c` exposes a stable interface
-independent of the provided primitives. `krw.c` intentionally includes only
-`primitives.h` + `kernel.h` from `include/libjailbreak/` (verbatim from
-opa334/Dopamine, MIT) — the umbrella `libjailbreak.h` pulls `jbclient_xpc.h`
-which requires private Theos SDK headers.
+`src/krw.h` / `src/krw.c` 中的薄封装层提供一个独立于底层原语的稳定接口。
+`krw.c` 有意只包含 `include/libjailbreak/` 中的 `primitives.h` + `kernel.h`
+（内容取自 opa334/Dopamine，MIT）——伞形头 `libjailbreak.h` 会引入
+`jbclient_xpc.h`，它需要私有 Theos SDK 头文件。
 
-## Layout
+## 目录结构
 
-| Path | Purpose |
-|------|---------|
-| `src/main.m` | CLI entry + dispatch |
-| `src/apphide.c` | app stash / restore / uicache / marker persistence |
-| `src/hide.c` | vnode VBAD primitives + proc platformize/csflags |
-| `src/krw.c` | `krw_*` wrapper over libjailbreak |
-| `src/fd_rdir.c` | `fd_rdir` chroot experiment (bindfs fake root) |
-| `Tweak/Tweak.xm` | Control Center overlay eye toggle |
-| `Filter.plist` | SpringBoard-only injection filter |
-| `stub/` | link-time stub of libjailbreak for builds |
+| 路径 | 用途 |
+|------|------|
+| `src/main.m` | CLI 入口 + 命令分发 |
+| `src/apphide.c` | 应用隐藏/恢复、uicache、标记文件持久化 |
+| `src/hide.c` | vnode VBAD 原语、进程 platformize/csflags |
+| `src/krw.c` | 封装 libjailbreak 的 `krw_*` 接口 |
+| `src/fd_rdir.c` | `fd_rdir` chroot 实验（bindfs 假根） |
+| `Tweak/Tweak.xm` | 控制中心 overlay 眼睛按钮 |
+| `Filter.plist` | 仅注入 SpringBoard 的过滤配置 |
+| `stub/` | 构建期 libjailbreak 的链接占位 |
