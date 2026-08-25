@@ -2,8 +2,11 @@
 #include <objc/runtime.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <dispatch/dispatch.h>
+
+extern "C" {
 #include "krw.h"
 #include "apphide.h"
+}
 
 #define kNotificationName CFSTR("com.xsf1re.jbevasion/toggle")
 #define kBundleID CFSTR("com.xsf1re.jbevasion")
