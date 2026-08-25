@@ -10,8 +10,8 @@
         <string>jbevasion</string>
         <key>isController</key>
         <true/>
-        <key>bundle</key>
-        <string>jbevasion</string>
+<key>bundle</key>
+<string>jbevasionprefs</string>
         <key>controller</key>
         <string>JBRootListController</string>
     </dict>

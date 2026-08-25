@@ -35,10 +35,10 @@ jbevasiontweak_PRIVATE_FRAMEWORKS = Preferences
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-BUNDLE_NAME = jbevasion
-jbevasion_FILES = Preferences/JBRootListController.m
-jbevasion_CFLAGS = -fobjc-arc
-jbevasion_PRIVATE_FRAMEWORKS = Preferences
-jbevasion_INSTALL_PATH = /Library/PreferenceBundles
+BUNDLE_NAME = jbevasionprefs
+jbevasionprefs_FILES = Preferences/JBRootListController.m
+jbevasionprefs_CFLAGS = -fobjc-arc
+jbevasionprefs_PRIVATE_FRAMEWORKS = Preferences
+jbevasionprefs_INSTALL_PATH = /Library/PreferenceBundles
 
 include $(THEOS_MAKE_PATH)/bundle.mk
