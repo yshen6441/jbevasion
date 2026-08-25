@@ -20,6 +20,16 @@ extern char **environ;
 
 #define MACH_HEADER_MAGIC_64 0xfeedfacf
 
+/* Attempt to become root if we were spawned as non-root (e.g. from RecoveryApp).
+ * On Dopamine the kernel is patched to allow setuid(0) for platform binaries. */
+__attribute__((constructor))
+static void ensure_root(void) {
+    if (getuid() != 0) {
+        setuid(0);
+        setgid(0);
+    }
+}
+
 static void print_usage(void) {
 	printf("Usage: jbevasion <command>\n");
 	printf("Commands:\n");
