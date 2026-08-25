@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* App hiding via file move + vnode VBAD + uicache + respring.
  * 1. Mark vnode VBAD so filesystem access fails immediately
  * 2. Move .app to stash directory
@@ -21,5 +25,9 @@ int apphide_hide_known(void);
 int apphide_unhide_all(void);
 int apphide_status(void);
 int apphide_refresh_ls(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

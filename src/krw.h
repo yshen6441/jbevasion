@@ -5,6 +5,10 @@
 #include <stdbool.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Dopamine libjailbreak backed KRW layer.
  *
@@ -55,4 +59,7 @@ int  krw_kcall(uint64_t *ret, uint64_t func, int argc, const uint64_t *argv);
 uint32_t krw_vnode_flags(uint64_t vnode);
 int      krw_vnode_set_flag(uint64_t vnode, uint64_t flag, bool set);
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* KRW_H */
