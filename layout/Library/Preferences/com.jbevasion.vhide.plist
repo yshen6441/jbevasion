@@ -26,5 +26,11 @@
 		<string>NewTerm</string>
 		<string>Terminal</string>
 	</array>
+	<key>BlockedURLSchemes</key>
+	<array>
+		<string>cydia</string>
+		<string>sileo</string>
+		<string>zebra</string>
+	</array>
 </dict>
 </plist>

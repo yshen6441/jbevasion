@@ -82,6 +82,11 @@ jbevasion vhide-reload      # 重载配置文件
         <string>Cydia</string>
         <string>MyApp</string>
     </array>
+    <key>BlockedURLSchemes</key>
+    <array>
+        <string>cydia</string>
+        <string>sileo</string>
+    </array>
 </dict>
 ```
 
@@ -92,6 +97,9 @@ jbevasion vhide-reload      # 重载配置文件
 - `ProtectedApps`：**apphide 应用白名单**。按应用名或 Bundle ID 的子串匹配，
   `apphide-all` / `apphide-known` / `apphide <id>` 隐藏时都会跳过这些应用。
   **完全由 plist 控制，无内置白名单**——`ProtectedApps` 为空时所有应用都会被隐藏
+- `BlockedURLSchemes`：**URL Scheme 拦截**。hook `UIApplication -canOpenURL:`，
+  任何应用查询列出的 scheme 都返回 NO，绕过 `cydia://` 等越狱检测。
+  修改后重启桌面生效
 
 ## KRW API 接口
 
@@ -109,6 +117,6 @@ jbevasion vhide-reload      # 重载配置文件
 | `src/hide.c` | vnode VBAD 原语、进程 platformize/csflags |
 | `src/krw.c` | 封装 libjailbreak 的 `krw_*` 接口 |
 | `src/fd_rdir.c` | `fd_rdir` chroot 实验（bindfs 假根） |
-| `Tweak/Tweak.xm` | 控制中心 overlay 眼睛按钮 |
+| `Tweak/Tweak.xm` | 控制中心 overlay 眼睛按钮 + URL Scheme 拦截 |
 | `Filter.plist` | 仅注入 SpringBoard 的过滤配置 |
 | `stub/` | 构建期 libjailbreak 的链接占位 |
