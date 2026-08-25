@@ -75,9 +75,9 @@ static int run_cmd(const char *path, char *const argv[]) {
     const char *jbpath = "/var/jb/usr/bin/jbevasion";
     if (access(jbpath, X_OK) != 0) jbpath = "/usr/bin/jbevasion";
     const char *cmd = sender.on ? "apphide-all" : "apphide-showall";
-    char *const args[] = { (char *)jbpath, (char *)cmd, NULL };
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        char *const args[] = { (char *)jbpath, (char *)cmd, NULL };
         int r = run_cmd(jbpath, args);
 
         dispatch_async(dispatch_get_main_queue(), ^{
