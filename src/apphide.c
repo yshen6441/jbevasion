@@ -213,9 +213,16 @@ static int hide_app_path(const char *app_path) {
     if (ensure_dir(STASH_DIR, 0755) != 0) return -1;
 
     /* Mark vnode VBAD so filesystem access fails immediately */
-    vnode_hide_path(app_path);
+    if (vnode_hide_path(app_path) != 0) {
+        fprintf(stderr, "apphide: failed to mark %s VBAD\n", app_path);
+        return -1;
+    }
 
-    if (move_app(app_path, dst) != 0) return -1;
+    if (move_app(app_path, dst) != 0) {
+        /* Roll the vnode back so we don't leave a half-hidden app on disk */
+        vnode_restore_last();
+        return -1;
+    }
 
     /* Export vnode data and persist to marker file for cross-process restore */
     uint64_t vaddr = 0;

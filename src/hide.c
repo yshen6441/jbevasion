@@ -100,6 +100,21 @@ int vnode_restore_path(uint64_t vaddr) {
 	return -1;
 }
 
+/* Roll back only the most recently hidden vnode. Used when an apphide move
+ * fails after the vnode was already marked VBAD, so the vnode is restored
+ * instead of leaving a half-hidden (unreachable but still on-disk) file. */
+int vnode_restore_last(void) {
+	if (g_saved_count == 0) return -1;
+	int i = g_saved_count - 1;
+	krw_write16(g_saved[i].vaddr + OFF_V_TYPE, g_saved[i].orig_v_type);
+	krw_write32(g_saved[i].vaddr + OFF_V_USECOUNT, g_saved[i].orig_usecount);
+	krw_write32(g_saved[i].vaddr + OFF_V_IOCOUNT, g_saved[i].orig_iocount);
+	printf("restore: rolled back vnode 0x%llx v_type=0x%x\n",
+	       (unsigned long long)g_saved[i].vaddr, g_saved[i].orig_v_type);
+	g_saved_count--;
+	return 0;
+}
+
 int vnode_restore_all(void) {
 	int restored = 0;
 	for (int i = 0; i < g_saved_count; i++) {

@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <spawn.h>
+#import <sys/wait.h>
 
 #define JBE_TOOL_PATH "/var/jb/usr/bin/jbevasion"
 #define JBE_STASH_DIR "/var/jb/.apphide-stash"
@@ -8,13 +9,20 @@
 - (void)setPresentationState:(NSInteger)state;
 @end
 
-static void jbev_run(const char *cmd) {
+/* Spawn the CLI and, when waitForExit is YES, block until it exits so the
+ * debounce window really covers the whole hide/show operation (uicache can
+ * take seconds) instead of a fixed sleep. */
+static void jbev_run(const char *cmd, BOOL waitForExit) {
 	pid_t pid;
 	const char *argv[] = { JBE_TOOL_PATH, cmd, NULL };
 	posix_spawn_file_actions_t actions;
 	posix_spawn_file_actions_init(&actions);
 	posix_spawn(&pid, JBE_TOOL_PATH, &actions, NULL, (char *const *)argv, NULL);
 	posix_spawn_file_actions_destroy(&actions);
+	if (waitForExit && pid > 0) {
+		int status = 0;
+		waitpid(pid, &status, 0);
+	}
 }
 
 static BOOL jbev_is_hidden(void) {
@@ -33,6 +41,25 @@ static BOOL jbev_is_hidden(void) {
 
 #define JBE_TOGGLE_TAG 0x4a42
 
+/* Debounce guard: the CLI is slow (uicache + respring can take several
+ * seconds), so rapid taps on the toggle would stack up parallel
+ * apphide-all / apphide-showall processes that race each other and leave
+ * the stash in an inconsistent mixed state. spawn is gated behind this flag
+ * and only re-armed after the previous command has finished. */
+static BOOL g_jbev_busy = NO;
+
+/* Refresh the eye icon + tint to match the on-disk stash state. Safe to call
+ * from the main thread at any time (no animations, no layout side effects). */
+static void jbev_style_button(UIButton *button) {
+	BOOL hidden = jbev_is_hidden();
+	UIColor *tint = hidden ? [UIColor systemOrangeColor] : [UIColor systemGreenColor];
+	UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightBold];
+	NSString *symbol = hidden ? @"eye.slash.fill" : @"eye.fill";
+	UIImage *img = [UIImage systemImageNamed:symbol withConfiguration:cfg];
+	[button setImage:img forState:UIControlStateNormal];
+	button.tintColor = tint;
+}
+
 - (void)setPresentationState:(NSInteger)state {
 	%orig;
 
@@ -41,19 +68,24 @@ static BOOL jbev_is_hidden(void) {
 		jbevToggleButton = [UIButton buttonWithType:UIButtonTypeSystem];
 		jbevToggleButton.tag = JBE_TOGGLE_TAG;
 		[jbevToggleButton addAction:[UIAction actionWithHandler:^(__kindof UIAction *handler) {
+			if (g_jbev_busy) return;
+
 			BOOL hidden = jbev_is_hidden();
-			jbev_run(hidden ? "apphide-showall" : "apphide-all");
+			const char *cmd = hidden ? "apphide-showall" : "apphide-all";
+
+			g_jbev_busy = YES;
+			dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+				jbev_run(cmd, YES);
+				dispatch_async(dispatch_get_main_queue(), ^{
+					g_jbev_busy = NO;
+					jbev_style_button(jbevToggleButton);
+				});
+			});
 		}] forControlEvents:UIControlEventTouchUpInside];
 		[self.view addSubview:jbevToggleButton];
 	}
 
-	UIColor *tint = jbev_is_hidden() ? [UIColor systemOrangeColor] : [UIColor systemGreenColor];
-	UIFont *font = [UIFont systemFontOfSize:20];
-	UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightBold];
-	NSString *symbol = jbev_is_hidden() ? @"eye.slash.fill" : @"eye.fill";
-	UIImage *img = [UIImage systemImageNamed:symbol withConfiguration:cfg];
-	[jbevToggleButton setImage:img forState:UIControlStateNormal];
-	jbevToggleButton.tintColor = tint;
+	jbev_style_button(jbevToggleButton);
 
 	CGFloat size = 36;
 	UIWindow *win = self.view.window;
