@@ -3,7 +3,32 @@
 <plist version="1.0">
 <dict>
 	<key>Targets</key>
-	<array/>
+	<array>
+		<string>/var/jb/usr/bin/bash</string>
+		<string>/var/jb/usr/bin/zsh</string>
+		<string>/var/jb/usr/sbin/sshd</string>
+		<string>/var/jb/usr/bin/dropbear</string>
+		<string>/var/jb/usr/bin/frida</string>
+		<string>/var/jb/usr/bin/frida-server</string>
+		<string>/var/jb/usr/lib/frida</string>
+		<string>/var/jb/usr/include/frida-core.h</string>
+		<string>/var/jb/etc/apt</string>
+		<string>/var/jb/usr/lib/apt</string>
+		<string>/var/jb/usr/lib/dpkg</string>
+		<string>/var/jb/var/lib/dpkg</string>
+		<string>/var/jb/var/lib/apt</string>
+		<string>/var/jb/var/cache/apt</string>
+		<string>/var/jb/var/log/apt</string>
+		<string>/var/jb/var/log/dpkg</string>
+		<string>/private/var/log/apt</string>
+		<string>/private/var/lib/apt</string>
+		<string>/private/var/lib/dpkg</string>
+		<string>/private/var/stash</string>
+		<string>/private/var/db/stash</string>
+		<string>/private/var/tmp/cydia.log</string>
+		<string>/private/var/mobile/Library/Preferences/com.ellekit</string>
+		<string>/private/var/mobile/Library/Preferences/com.substrate</string>
+	</array>
 	<key>ProtectedTokens</key>
 	<array>
 		<string>Cydia.app</string>

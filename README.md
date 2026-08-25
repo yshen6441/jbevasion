@@ -90,7 +90,9 @@ jbevasion vhide-reload      # 重载配置文件
 </dict>
 ```
 
-- `Targets`：额外要隐藏的路径，`vhide-all` 时一并处理（需存在且未被保护规则拦截）
+- `Targets`：vhide 隐藏目标。路径列表，`vhide-all` 时将这些路径做 vnode 隐藏（VBAD）。
+  默认包含常见越狱检测路径（bash/zsh/sshd/frida/dpkg/apt 等），你可以自由增删。
+  **完全由 plist 控制，无内置硬编码目标**——`Targets` 为空时 `vhide-all` 什么也不藏
 - `ProtectedTokens`：你的白名单。目标路径只要包含其中任一子串就永不隐藏。
   内置的运行时必需规则（`libjailbreak`/`TweakInject`/`ellekit`/`substrate`/`jailbreakd`/`jbevasion`）
   始终生效，不会因配置文件而解除

@@ -30,41 +30,6 @@ static const char *g_protected_builtin[] = {
 	NULL,
 };
 
-/*
- * Safe default hide targets. These are the classic jailbreak-detection
- * traces that are NOT needed for any tweak/plugin to run, so hiding them
- * can't break the environment. All paths are checked against the protected
- * list first and skipped if any match. The on-disk config plist can
- * extend both lists (see vhide_config_load).
- */
-static const char *g_targets_builtin[] = {
-	"/var/jb/usr/bin/bash",
-	"/var/jb/usr/bin/zsh",
-	"/var/jb/usr/sbin/sshd",
-	"/var/jb/usr/bin/dropbear",
-	"/var/jb/usr/bin/frida",
-	"/var/jb/usr/bin/frida-server",
-	"/var/jb/usr/lib/frida",
-	"/var/jb/usr/include/frida-core.h",
-	"/var/jb/etc/apt",
-	"/var/jb/usr/lib/apt",
-	"/var/jb/usr/lib/dpkg",
-	"/var/jb/var/lib/dpkg",
-	"/var/jb/var/lib/apt",
-	"/var/jb/var/cache/apt",
-	"/var/jb/var/log/apt",
-	"/var/jb/var/log/dpkg",
-	"/private/var/log/apt",
-	"/private/var/lib/apt",
-	"/private/var/lib/dpkg",
-	"/private/var/stash",
-	"/private/var/db/stash",
-	"/private/var/tmp/cydia.log",
-	"/private/var/mobile/Library/Preferences/com.ellekit",
-	"/private/var/mobile/Library/Preferences/com.substrate",
-	NULL,
-};
-
 #define VHIDE_CONFIG_PATH "/var/jb/Library/Preferences/com.jbevasion.vhide.plist"
 
 /* Config plist keys */
@@ -225,13 +190,6 @@ const char *vhide_protected_app_at(int i) {
 
 int vhide_known(void) {
 	int hidden = 0, skipped = 0, missing = 0;
-	for (int i = 0; g_targets_builtin[i]; i++) {
-		const char *p = g_targets_builtin[i];
-		if (is_protected(p)) { skipped++; continue; }
-		if (!path_exists(p)) { missing++; continue; }
-		if (vnode_hide_path(p) == 0) hidden++;
-		else skipped++;
-	}
 	for (int i = 0; i < g_custom_target_count; i++) {
 		const char *p = g_custom_targets[i];
 		if (is_protected(p)) { skipped++; continue; }
@@ -268,23 +226,7 @@ int vhide_status(void) {
 	for (int i = 0; i < g_custom_app_count; i++) {
 		printf("  %s\n", g_custom_apps[i]);
 	}
-	printf("vhide: target state (builtin + custom):\n");
-	for (int i = 0; g_targets_builtin[i]; i++) {
-		uint16_t vtype = 0;
-		if (!path_exists(g_targets_builtin[i])) {
-			printf("  [missing] %s\n", g_targets_builtin[i]);
-			continue;
-		}
-		if (krw_ready()) {
-			int fd = open(g_targets_builtin[i], O_RDONLY | O_NONBLOCK);
-			if (fd >= 0) {
-				uint64_t vn = krw_proc_vnode_for_fd(krw_proc_self(), fd);
-				close(fd);
-				if (vn) vtype = krw_read16(vn + 0x74);
-			}
-		}
-		printf("  [%s] %s\n", (vtype == 0) ? "hidden(VBAD)" : "visible", g_targets_builtin[i]);
-	}
+	printf("vhide: target state (from plist Targets):\n");
 	for (int i = 0; i < g_custom_target_count; i++) {
 		uint16_t vtype = 0;
 		if (!path_exists(g_custom_targets[i])) {
