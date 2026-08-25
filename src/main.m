@@ -35,7 +35,7 @@ static void print_usage(void) {
 	printf("  hide               (deprecated) Per-process cleanup only\n");
 	printf("  restore            (deprecated) No-op\n");
 	printf("  apphide list       List jailbroken apps in /var/jb/Applications\n");
-	printf("  apphide <bundleid> Hide one app (kernel vnode VBAD)\n");
+	printf("  apphide <bundleid> Hide one app (move .app + uicache + respring)\n");
 	printf("  apphide-known      Hide well-known package managers (Sileo/Cydia/Filza...)\n");
 	printf("  apphide-all        Hide every app in /var/jb/Applications\n");
 	printf("  apphide-show <id>  Restore one hidden app\n");

@@ -9,15 +9,17 @@
 #include <errno.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <spawn.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <sys/param.h>
 #include <CoreFoundation/CoreFoundation.h>
 
+extern char **environ;
+
 #define JB_APPS_DIR   "/var/jb/Applications"
 #define STASH_DIR     "/var/jb/.apphide-stash"
-#define TRACKING_FILE STASH_DIR "/tracking"
 
-/* Well-known jailbreak app directory names (without .app suffix) */
 static const char *known_ids[] = {
     "Sileo",
     "Cydia",
@@ -83,15 +85,10 @@ static char *read_bundle_id(const char *app_dir) {
 
     CFDataRef cfdata = CFDataCreateWithBytesNoCopy(NULL, (const UInt8 *)data, (CFIndex)size, kCFAllocatorNull);
     if (!cfdata) { free(data); return NULL; }
-
     CFStringRef err = NULL;
     CFPropertyListRef plist = CFPropertyListCreateWithData(NULL, cfdata, kCFPropertyListImmutable, NULL, &err);
     CFRelease(cfdata);
-    if (!plist) {
-        if (err) CFRelease(err);
-        free(data);
-        return NULL;
-    }
+    if (!plist) { if (err) CFRelease(err); free(data); return NULL; }
 
     char *ret = NULL;
     if (CFDictionaryGetTypeID() == CFGetTypeID(plist)) {
@@ -103,9 +100,7 @@ static char *read_bundle_id(const char *app_dir) {
                 CFIndex len = CFStringGetLength(val);
                 CFIndex max = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8) + 1;
                 ret = calloc(1, max);
-                if (ret) {
-                    CFStringGetCString(val, ret, max, kCFStringEncodingUTF8);
-                }
+                if (ret) CFStringGetCString(val, ret, max, kCFStringEncodingUTF8);
             }
         }
     }
@@ -154,126 +149,111 @@ static char *find_app_by_id(const char *search_dir, const char *bundle_id) {
     return match;
 }
 
-static int write_tracking_entry(const char *app_path, uint64_t vaddr) {
-    if (ensure_dir(STASH_DIR, 0755) != 0) return -1;
-    FILE *fp = fopen(TRACKING_FILE, "a");
-    if (!fp) {
-        fprintf(stderr, "apphide: cannot open %s: %s\n", TRACKING_FILE, strerror(errno));
+static int move_app(const char *src, const char *dst) {
+    if (rename(src, dst) != 0) {
+        fprintf(stderr, "apphide: rename(%s, %s) failed: %s\n", src, dst, strerror(errno));
         return -1;
     }
-    fprintf(fp, "0x%016llx %s\n", (unsigned long long)vaddr, app_path);
-    fclose(fp);
     return 0;
 }
 
-static int read_tracking_entry(const char *app_path, uint64_t *vaddr_out) {
-    FILE *fp = fopen(TRACKING_FILE, "r");
-    if (!fp) return -1;
-    char line[1024];
-    while (fgets(line, sizeof(line), fp)) {
-        uint64_t va = 0;
-        char path[PATH_MAX];
-        if (sscanf(line, "0x%llx %1023s", (unsigned long long *)&va, path) == 2) {
-            if (strcmp(path, app_path) == 0) {
-                *vaddr_out = va;
-                fclose(fp);
-                return 0;
-            }
-        }
+static int run_uicache(void) {
+    static const char *candidates[] = {
+        "/var/jb/usr/bin/uicache",
+        "/var/jb/usr/bin/uicache-strapped",
+        "/usr/bin/uicache",
+        NULL,
+    };
+    const char *uc = NULL;
+    for (int i = 0; candidates[i]; i++) {
+        if (access(candidates[i], X_OK) == 0) { uc = candidates[i]; break; }
     }
-    fclose(fp);
-    return -1;
+    if (!uc) {
+        fprintf(stderr, "apphide: no uicache found\n");
+        return -1;
+    }
+
+    pid_t pid = 0;
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_set_persona_np(&attr, 501, 1);
+    posix_spawnattr_set_persona_uid_np(&attr, 501);
+    posix_spawnattr_set_persona_gid_np(&attr, 501);
+    char *args[] = { (char *)uc, "-a", NULL };
+    int r = posix_spawn(&pid, uc, NULL, &attr, args, environ);
+    posix_spawnattr_destroy(&attr);
+    if (r != 0) {
+        fprintf(stderr, "apphide: posix_spawn(uicache) failed: %s\n", strerror(r));
+        return -1;
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "apphide: uicache exited with status %d\n",
+                WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        return -1;
+    }
+    return 0;
 }
 
-static int remove_tracking_entry(const char *app_path) {
-    FILE *fp = fopen(TRACKING_FILE, "r");
-    if (!fp) return -1;
-    char lines[256][1024];
-    int n = 0;
-    char line[1024];
-    while (fgets(line, sizeof(line), fp) && n < 256) {
-        char path[PATH_MAX];
-        if (sscanf(line, "%*s %1023s", path) == 1) {
-            if (strcmp(path, app_path) != 0) {
-                strlcpy(lines[n++], line, sizeof(lines[0]));
-            }
-        }
-    }
-    fclose(fp);
-    fp = fopen(TRACKING_FILE, "w");
-    if (!fp) return -1;
-    for (int i = 0; i < n; i++) {
-        fputs(lines[i], fp);
-    }
-    fclose(fp);
-    return 0;
+static void respring(void) {
+    pid_t pid = 0;
+    char *args[4];
+    args[0] = "/usr/bin/killall";
+    args[1] = "-9";
+    args[2] = "SpringBoard";
+    args[3] = NULL;
+    const char *jb_killall = "/var/jb/usr/bin/killall";
+    if (access(jb_killall, X_OK) == 0) args[0] = (char *)jb_killall;
+    posix_spawn(&pid, args[0], NULL, NULL, args, environ);
+    /* Don't wait — respring kills us too */
+}
+
+static void refresh_ls(void) {
+    printf("apphide: running uicache -a as mobile...\n");
+    run_uicache();
+    printf("apphide: respringing SpringBoard...\n");
+    respring();
 }
 
 static int hide_app_path(const char *app_path) {
-    const char *name = strrchr(app_path, '/');
-    if (!name) return -1;
-    name++;
+    const char *slash = strrchr(app_path, '/');
+    const char *name = slash ? slash + 1 : app_path;
 
-    char marker[PATH_MAX];
-    snprintf(marker, sizeof(marker), "%s/%s.hidden", STASH_DIR, name);
-    if (file_exists(marker)) {
+    char dst[PATH_MAX];
+    snprintf(dst, sizeof(dst), "%s/%s", STASH_DIR, name);
+    if (file_exists(dst)) {
         printf("apphide: %s already hidden\n", app_path);
         return 0;
     }
 
-    int rc = vnode_hide_path(app_path);
-    if (rc != 0) {
-        fprintf(stderr, "apphide: vnode hide failed for %s\n", app_path);
-        return -1;
-    }
+    if (ensure_dir(STASH_DIR, 0755) != 0) return -1;
 
-    uint64_t vnode = 0;
-    /* We don't have the vnode address from vnode_hide_path directly,
-     * but we can get it by opening the path before hide. However,
-     * vnode_hide_path already opened it internally. Let me just
-     * re-get it for tracking purposes. Actually, we can't open
-     * a VBAD file. So let me use a different approach: store the
-     * path and find the vnode in the saved list later. */
+    /* Mark vnode VBAD so filesystem access fails immediately */
+    vnode_hide_path(app_path);
 
-    /* Write a marker file to track which apps are hidden */
-    ensure_dir(STASH_DIR, 0755);
-    FILE *mf = fopen(marker, "w");
-    if (mf) {
-        fprintf(mf, "%s\n", app_path);
-        fclose(mf);
-    }
-
-    printf("apphide: hidden %s\n", app_path);
+    if (move_app(app_path, dst) != 0) return -1;
+    printf("apphide: hidden %s -> %s\n", app_path, dst);
     return 0;
 }
 
 static int unhide_by_name(const char *name) {
-    char marker[PATH_MAX];
-    snprintf(marker, sizeof(marker), "%s/%s.hidden", STASH_DIR, name);
-    if (!file_exists(marker)) {
-        fprintf(stderr, "apphide: %s is not hidden\n", name);
+    char src[PATH_MAX];
+    snprintf(src, sizeof(src), "%s/%s", STASH_DIR, name);
+    if (!file_exists(src)) {
+        fprintf(stderr, "apphide: %s is not in stash\n", name);
         return -1;
     }
 
-    /* Read original path from marker */
-    FILE *mf = fopen(marker, "r");
-    if (!mf) return -1;
-    char app_path[PATH_MAX];
-    if (!fgets(app_path, sizeof(app_path), mf)) {
-        fclose(mf);
-        return -1;
-    }
-    fclose(mf);
-    app_path[strcspn(app_path, "\n")] = '\0';
+    char dst[PATH_MAX];
+    snprintf(dst, sizeof(dst), "%s/%s", JB_APPS_DIR, name);
 
-    /* Restore all hidden vnodes — for single app restore we need to
-     * find the right vnode. Since we can't open the path to get the
-     * vnode (it's VBAD), we restore all and re-hide the others. */
+    if (move_app(src, dst) != 0) return -1;
+
+    /* Restore vnode so the app is visible on filesystem again */
     vnode_restore_all();
 
-    /* Remove the marker */
-    unlink(marker);
-    printf("apphide: restored %s\n", app_path);
+    printf("apphide: restored %s -> %s\n", name, dst);
     return 0;
 }
 
@@ -306,9 +286,7 @@ int apphide_list(void) {
     if (d) {
         while ((ent = readdir(d)) != NULL) {
             if (ent->d_name[0] == '.') continue;
-            char *dot = strstr(ent->d_name, ".hidden");
-            if (dot) {
-                *dot = '\0';
+            if (strstr(ent->d_name, ".app") != NULL) {
                 printf("  %s\n", ent->d_name);
             }
         }
@@ -329,6 +307,7 @@ int apphide_hide(const char *bundle_id) {
     }
     int rc = hide_app_path(app_path);
     free(app_path);
+    if (rc == 0) refresh_ls();
     return rc;
 }
 
@@ -343,52 +322,8 @@ int apphide_unhide(const char *bundle_id) {
         free(app_path);
         return 0;
     }
-    /* Try to find by marker name */
-    char marker_path[PATH_MAX];
-    snprintf(marker_path, sizeof(marker_path), "%s/%s.hidden", STASH_DIR, bundle_id);
-    if (file_exists(marker_path)) {
-        return unhide_by_name(bundle_id);
-    }
-    /* Try by bundle id in marker files */
-    DIR *d = opendir(STASH_DIR);
-    if (!d) {
-        fprintf(stderr, "apphide: no stash dir (%s)\n", STASH_DIR);
-        return -1;
-    }
-    struct dirent *ent;
-    int rc = -1;
-    while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        char *dot = strstr(ent->d_name, ".hidden");
-        if (!dot) continue;
-        char marker[PATH_MAX];
-        snprintf(marker, sizeof(marker), "%s/%s", STASH_DIR, ent->d_name);
-        FILE *mf = fopen(marker, "r");
-        if (!mf) continue;
-        char app_path[PATH_MAX];
-        if (fgets(app_path, sizeof(app_path), mf)) {
-            app_path[strcspn(app_path, "\n")] = '\0';
-            char *bid = read_bundle_id(app_path);
-            if (bid) {
-                /* The app_path leads to a VBAD dir, so read_bundle_id will fail.
-                 * Instead, match by marker filename. */
-                free(bid);
-            }
-        }
-        fclose(mf);
-        /* Match by marker filename (strip .hidden) */
-        *dot = '\0';
-        if (strcmp(ent->d_name, bundle_id) == 0) {
-            *dot = '.';
-            rc = unhide_by_name(ent->d_name);
-            break;
-        }
-        *dot = '.';
-    }
-    closedir(d);
-    if (rc != 0) {
-        fprintf(stderr, "apphide: no hidden app with id '%s' found\n", bundle_id);
-    }
+    int rc = unhide_by_name(bundle_id);
+    if (rc == 0) refresh_ls();
     return rc;
 }
 
@@ -398,20 +333,21 @@ int apphide_unhide_all(void) {
         fprintf(stderr, "apphide: no stash dir (%s)\n", STASH_DIR);
         return 0;
     }
-    int n = 0;
     struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
+    char names[128][128];
+    int n = 0;
+    while ((ent = readdir(d)) != NULL && n < 128) {
         if (ent->d_name[0] == '.') continue;
-        char *dot = strstr(ent->d_name, ".hidden");
-        if (dot) {
-            *dot = '\0';
-            unhide_by_name(ent->d_name);
-            *dot = '.';
-            n++;
+        if (strstr(ent->d_name, ".app") != NULL) {
+            strlcpy(names[n++], ent->d_name, sizeof(names[0]));
         }
     }
     closedir(d);
+    for (int i = 0; i < n; i++) {
+        unhide_by_name(names[i]);
+    }
     printf("apphide: restored %d hidden app(s)\n", n);
+    if (n > 0) refresh_ls();
     return 0;
 }
 
@@ -433,6 +369,7 @@ int apphide_hide_all(void) {
     }
     closedir(d);
     printf("apphide: hidden %d app(s)\n", count);
+    if (count > 0) refresh_ls();
     return 0;
 }
 
@@ -456,11 +393,9 @@ int apphide_hide_known(void) {
             free(app_path);
         }
     }
-    printf("apphide: hidden %d known app(s)\n", count);
-    if (count > 0) {
-        printf("apphide: hidden apps: %s\n", matched);
-    }
+    printf("apphide: hidden %d known app(s): %s\n", count, matched);
     free(matched);
+    if (count > 0) refresh_ls();
     return 0;
 }
 
@@ -493,21 +428,8 @@ int apphide_status(void) {
     if (d) {
         while ((ent = readdir(d)) != NULL) {
             if (ent->d_name[0] == '.') continue;
-            char *dot = strstr(ent->d_name, ".hidden");
-            if (dot) {
-                *dot = '\0';
-                char marker[PATH_MAX];
-                snprintf(marker, sizeof(marker), "%s/%s", STASH_DIR, ent->d_name);
-                FILE *mf = fopen(marker, "r");
-                if (mf) {
-                    char orig[PATH_MAX];
-                    if (fgets(orig, sizeof(orig), mf)) {
-                        orig[strcspn(orig, "\n")] = '\0';
-                        printf("  hidden   %s\n", orig);
-                    }
-                    fclose(mf);
-                }
-                *dot = '.';
+            if (strstr(ent->d_name, ".app") != NULL) {
+                printf("  hidden   %s\n", ent->d_name);
             }
         }
         closedir(d);
@@ -516,6 +438,7 @@ int apphide_status(void) {
 }
 
 int apphide_refresh_ls(void) {
-    printf("apphide: vnode-based hiding does not need LS refresh\n");
+    printf("apphide: refreshing LaunchServices and respringing...\n");
+    refresh_ls();
     return 0;
 }

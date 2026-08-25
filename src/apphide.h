@@ -3,11 +3,14 @@
 
 #include <stdbool.h>
 
-/* Kernel-level app hiding via vnode VBAD marking.
- * Apps disappear from the filesystem instantly — no uicache or respring needed.
+/* App hiding via file move + vnode VBAD + uicache + respring.
+ * 1. Mark vnode VBAD so filesystem access fails immediately
+ * 2. Move .app to stash directory
+ * 3. Run uicache -a as mobile to update LaunchServices database
+ * 4. Respring SpringBoard to refresh icon model
  *
- * Hidden apps are tracked in /var/jb/.apphide-stash/<name>.hidden marker files.
- * Restoring rewrites the original vnode data, making the app reappear.
+ * Hidden apps are parked in /var/jb/.apphide-stash/<name>.app.
+ * Restoring reverses the process.
  */
 
 int apphide_list(void);
