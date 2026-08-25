@@ -20,6 +20,26 @@ extern char **environ;
 #define JB_APPS_DIR   "/var/jb/Applications"
 #define STASH_DIR     "/var/jb/.apphide-stash"
 
+/*
+ * Apps that must NEVER be hidden: package managers and essential tools the
+ * user needs even in hiding mode. apphide-all / apphide-known / apphide <id>
+ * all skip these so the jailbreak stays usable (e.g. Cydia to install debs).
+ */
+static const char *g_protected_apps[] = {
+    "Cydia",
+    "Sileo",
+    "Zebra",
+    "Installer",
+    "Installer 5",
+    "Filza",
+    "FilzaFileManager",
+    "NewTerm",
+    "NewTerm 2",
+    "Terminal",
+    "Santander",
+    NULL,
+};
+
 static const char *known_ids[] = {
     "Sileo",
     "Cydia",
@@ -199,9 +219,31 @@ static void refresh_ls(void) {
     printf("apphide: LS database updated.\n");
 }
 
+static int is_protected_app(const char *app_path) {
+    const char *slash = strrchr(app_path, '/');
+    const char *name = slash ? slash + 1 : app_path;
+    char base[128];
+    strip_app_suffix(name, base, sizeof(base));
+
+    char *bid = read_bundle_id(app_path);
+    for (int i = 0; g_protected_apps[i]; i++) {
+        if (strstr(base, g_protected_apps[i]) || (bid && strstr(bid, g_protected_apps[i]))) {
+            free(bid);
+            return 1;
+        }
+    }
+    free(bid);
+    return 0;
+}
+
 static int hide_app_path(const char *app_path) {
     const char *slash = strrchr(app_path, '/');
     const char *name = slash ? slash + 1 : app_path;
+
+    if (is_protected_app(app_path)) {
+        printf("apphide: skipping protected app %s (whitelisted)\n", app_path);
+        return 1;
+    }
 
     char dst[PATH_MAX];
     snprintf(dst, sizeof(dst), "%s/%s", STASH_DIR, name);
