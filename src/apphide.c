@@ -36,13 +36,6 @@ static const char *known_ids[] = {
     NULL,
 };
 
-/* Bundle IDs that must never be hidden automatically — losing the terminal
- * leaves the user with no way to run apphide-showall to recover. */
-static const char *protect_ids[] = {
-    "ws.hbang.Terminal",
-    NULL,
-};
-
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
 /* ------------------------------------------------------------------ */
@@ -64,24 +57,6 @@ static int ensure_dir(const char *path, mode_t mode) {
         return -1;
     }
     return 0;
-}
-
-static char *read_bundle_id(const char *app_dir);
-
-/* Check if app_path matches any protected bundle ID by reading Info.plist
- * via CoreFoundation (handles both XML and binary plist formats). */
-static bool is_protected_app(const char *app_path) {
-    char *bid = read_bundle_id(app_path);
-    if (!bid) return false;
-    bool matched = false;
-    for (int i = 0; protect_ids[i]; i++) {
-        if (strcmp(bid, protect_ids[i]) == 0) {
-            matched = true;
-            break;
-        }
-    }
-    free(bid);
-    return matched;
 }
 
 /* Read the CFBundleIdentifier out of an Info.plist using CoreFoundation.
@@ -375,10 +350,6 @@ int apphide_hide_all(void) {
         char dpath[PATH_MAX];
         snprintf(dpath, sizeof(dpath), "%s/%s", JB_APPS_DIR, ent->d_name);
         if (!is_dir(dpath)) continue;
-        if (is_protected_app(dpath)) {
-            printf("apphide: skipping protected app %s\n", ent->d_name);
-            continue;
-        }
         if (hide_app_path(dpath) == 0) count++;
     }
     closedir(d);
