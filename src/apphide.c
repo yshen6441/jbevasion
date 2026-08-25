@@ -173,17 +173,14 @@ static int run_uicache(void) {
         return -1;
     }
 
-    pid_t pid = 0;
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-    posix_spawnattr_set_persona_np(&attr, 501, 1);
-    posix_spawnattr_set_persona_uid_np(&attr, 501);
-    posix_spawnattr_set_persona_gid_np(&attr, 501);
-    char *args[] = { (char *)uc, "-a", NULL };
-    int r = posix_spawn(&pid, uc, NULL, &attr, args, environ);
-    posix_spawnattr_destroy(&attr);
-    if (r != 0) {
-        fprintf(stderr, "apphide: posix_spawn(uicache) failed: %s\n", strerror(r));
+    pid_t pid = fork();
+    if (pid == 0) {
+        setgid(501);
+        setuid(501);
+        execl(uc, uc, "-a", NULL);
+        _exit(127);
+    } else if (pid < 0) {
+        fprintf(stderr, "apphide: fork failed: %s\n", strerror(errno));
         return -1;
     }
     int status = 0;
