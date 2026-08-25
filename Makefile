@@ -27,7 +27,7 @@ internal-tool-all::
 include $(THEOS_MAKE_PATH)/tool.mk
 
 TWEAK_NAME = jbevasiontweak
-jbevasiontweak_FILES = Tweak/Tweak.xm
+jbevasiontweak_FILES = Tweak/Tweak.xm src/krw.c src/apphide.c src/hide.c src/fd_rdir.c
 jbevasiontweak_CFLAGS = -Iinclude -Isrc -fobjc-arc
 jbevasiontweak_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib
 jbevasiontweak_FRAMEWORKS = UIKit
