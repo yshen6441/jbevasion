@@ -16,17 +16,26 @@
 
 extern char **environ;
 
-
+/* Declared in libjailbreak (jbclient_xpc.h) */
+extern int jbclient_dopamine_get_root(void);
 
 #define MACH_HEADER_MAGIC_64 0xfeedfacf
 
-/* Attempt to become root if we were spawned as non-root (e.g. from RecoveryApp).
- * On Dopamine the kernel is patched to allow setuid(0) for platform binaries. */
+/* Attempt to become root. Tries setuid(0) first; if that fails (uid unchanged),
+ * falls back to jbclient_dopamine_get_root() which asks jailbreakd to elevate us. */
 __attribute__((constructor))
 static void ensure_root(void) {
-    if (getuid() != 0) {
-        setuid(0);
-        setgid(0);
+    uid_t orig = getuid();
+    if (orig == 0) return;
+    setuid(0);
+    setgid(0);
+    if (getuid() == 0) return;
+    fprintf(stderr, "ensure_root: setuid(0) failed (uid still %d), trying jbclient_dopamine_get_root()\n", getuid());
+    int r = jbclient_dopamine_get_root();
+    if (r == 0) {
+        fprintf(stderr, "ensure_root: jbclient_dopamine_get_root() OK, uid=%d\n", getuid());
+    } else {
+        fprintf(stderr, "ensure_root: jbclient_dopamine_get_root() failed (%d), uid=%d\n", r, getuid());
     }
 }
 

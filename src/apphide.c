@@ -361,6 +361,7 @@ int apphide_unhide(const char *bundle_id) {
 }
 
 int apphide_unhide_all(void) {
+    fprintf(stderr, "apphide-unhide_all: uid=%d euid=%d\n", getuid(), geteuid());
     DIR *d = opendir(STASH_DIR);
     if (!d) {
         fprintf(stderr, "apphide: no stash dir (%s)\n", STASH_DIR);
@@ -388,6 +389,7 @@ int apphide_unhide_all(void) {
 }
 
 int apphide_hide_all(void) {
+    fprintf(stderr, "apphide-hide_all: uid=%d euid=%d\n", getuid(), geteuid());
     DIR *d = opendir(JB_APPS_DIR);
     if (!d) {
         fprintf(stderr, "apphide: cannot open %s\n", JB_APPS_DIR);
