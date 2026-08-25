@@ -35,6 +35,7 @@ static BOOL apps_are_hidden(void) {
 }
 
 - (void)setSelected:(BOOL)selected {
+    [super setSelected:selected];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int ret = krw_init();
         if (ret != 0) {
