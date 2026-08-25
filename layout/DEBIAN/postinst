@@ -1,3 +1,16 @@
 #!/bin/sh
 chown root:wheel /var/jb/usr/bin/jbevasion
 chmod 6755 /var/jb/usr/bin/jbevasion
+
+# Remove old PreferenceLoader entry if it exists
+rm -f /var/jb/Library/PreferenceLoader/Preferences/jbevasion.plist
+
+# Remove old tweak if it exists
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbevasiontweak.dylib
+rm -f /var/jb/Library/MobileSubstrate/DynamicLibraries/jbevasiontweak.plist
+
+# Remove old preference bundle if it exists
+rm -rf /var/jb/Library/PreferenceBundles/jbevasionprefs.bundle
+
+echo "jbevasion: installed. Please respring to load Control Center module."
+echo "Then add it in Settings > Control Center > Customize Controls."

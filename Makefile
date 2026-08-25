@@ -26,19 +26,11 @@ internal-tool-all::
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
-TWEAK_NAME = jbevasiontweak
-jbevasiontweak_FILES = Tweak/Tweak.xm src/krw.c src/apphide.c src/hide.c src/fd_rdir.c
-jbevasiontweak_CFLAGS = -Iinclude -Isrc -fobjc-arc
-jbevasiontweak_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib
-jbevasiontweak_FRAMEWORKS = UIKit
-
-include $(THEOS_MAKE_PATH)/tweak.mk
-
-BUNDLE_NAME = jbevasionprefs
-jbevasionprefs_FILES = Preferences/JBRootListController.m
-jbevasionprefs_CFLAGS = -Iinclude -fobjc-arc
-jbevasionprefs_LDFLAGS = -undefined dynamic_lookup
-jbevasionprefs_INSTALL_PATH = /Library/PreferenceBundles
-jbevasionprefs_RESOURCE_FILES = Preferences/Root.plist Preferences/Info.plist
+BUNDLE_NAME = jbevasioncc
+jbevasioncc_FILES = ControlCenter/JBEvasionCCModule.m src/krw.c src/apphide.c src/hide.c src/fd_rdir.c
+jbevasioncc_CFLAGS = -Iinclude -Isrc -fobjc-arc
+jbevasioncc_LDFLAGS = -Lstub -ljailbreak -Wl,-rpath,/var/jb/usr/lib -undefined dynamic_lookup
+jbevasioncc_INSTALL_PATH = /Library/ControlCenter/Bundles
+jbevasioncc_RESOURCE_FILES = ControlCenter/Info.plist
 
 include $(THEOS_MAKE_PATH)/bundle.mk
